@@ -51,6 +51,13 @@ def merge_graphs(graphs):
 	return merged
 
 
+def spec_from_snippet(snip):
+	"""Node spec (see make_node) from a codegen.parse_snippet result."""
+	return {'type': snip['type'],
+	        'inputs': {name: t for (t, name, _) in snip['ins']},
+	        'outputs': {name: t for (t, name) in snip['outs']}}
+
+
 def make_node(spec, node_id, literals, upstream, out_socket=None):
 	"""
 	spec:      {'type': str, 'inputs': {socket: type}, 'outputs': {socket: type}}
@@ -122,5 +129,5 @@ def build_node(scriptOp, spec, out_socket=None):
 		g = empty_graph()
 		g['error'] = '%s: %s' % (comp.path, e)
 	scriptOp.clear()
+	scriptOp.textFormat = True   # before .text: a table-mode DAT splits the text into cells
 	scriptOp.text = dump_graph(g)
-	scriptOp.textFormat = True   # must be last: adding rows reverts to table

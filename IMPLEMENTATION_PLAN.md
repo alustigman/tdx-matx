@@ -31,7 +31,7 @@ def onCook(scriptOp):
 
 #### Script DAT facts that constrain the design
 From the [Script DAT](https://docs.derivative.ca/Script_DAT) and [scriptDAT class](https://docs.derivative.ca/ScriptDAT_Class) docs:
-- **Text output:** a Script DAT is a table by default. To output JSON as plain text, assign `scriptOp.text = ...` and set `scriptOp.textFormat = True` as the **last** call in `onCook` (adding rows afterwards reverts it to a table). Downstream, read it with `op.text`.
+- **Text output:** a Script DAT is a table by default. To output JSON as plain text, set `scriptOp.textFormat = True` and then assign `scriptOp.text = ...` (assigning text while still in table mode splits it on tabs; adding rows afterwards reverts it to a table). Downstream, read it with `op.text`.
 - **Newlines:** `.text` removes newlines in table cells, so emit **compact single-line JSON** (`json.dumps(g, separators=(',', ':'))`). Pretty-printing is for a debug view only. `.csv` would allow multi-line cells but isn't needed.
 - **Dependencies are automatic:** any op, parameter or node the Script DAT touches during `onCook` is tracked, so reading a node's custom parameters or upstream `inputs[i].text` re-cooks the chain when they change. The dependency list resets on project restart. No manual cook triggers are needed. This also means reading unrelated ops inside `onCook` (e.g. `absTime`) would cause needless re-cooks, so core code must avoid it.
 - **Inputs:** `scriptOp.inputs` lists the DATs on the Script DAT's own left connectors, so sockets can feed the Script DAT directly (named In DATs inside the COMP -> Script DAT inputs in a fixed order), or the Script can read the In DATs by name with `parent().op('in_fac')`. The second is more robust against reordering; use it.
@@ -123,9 +123,16 @@ Algorithm:
 
 **Reference:** the generated shaders now follow TD's own Phong/PBR MAT export (`basicPBRVert.vert`, `basicPBRFrag.frag`): `Vertex` interface block (`oVert` / `iVert`), picking guard + `TDWritePickingValues()`, `TDInstanceColor/TexCoord`, `TDUVUnwrapCoord`, `TDCheckDiscard`, `TDPixelColor`, `TDFrontFacing` normal flip, 0.08 specular level, roughness clamp, premultiplied alpha, and the output tail `TDFog` -> `TDDither` -> `TDAlphaTest` -> `TDConvertColorSpace` -> `TDOutputSwizzle` with the extra color buffers zeroed. `TDCameraIndex()` is vertex-only, so it travels as `iVert.cameraIndex` (the `camera_index` attribute, always emitted because fog needs it).
 
-**Not verified yet (needs TouchDesigner):** `TDInstanceTexCoord(TDTexCoord(0u))` for the `uv` attribute, and `read_literal`'s custom-parameter/tuplet lookup. Everything else was copied from the TD export.
+**In TouchDesigner (`matx-testingGround.toe`, verified on 2025.33230):**
+- `/matx` (op shortcut `Matx`) holds the library. `core/` has Text DATs synced to `core/*.py`; `snippets/` has one Text DAT per `glsl/nodes/*.glsl` (named after its `@type`) and per `glsl/lib/*.glsl` (`lib_<name>`), synced to the files; `nodes/` has one generated node COMP per snippet plus `EvaluateShader`.
+- `core/td_builder.py` generates `snippets/` and `nodes/` from the `.glsl` files. Run it with the **Build** pulse on `/matx` (Matx page). It is idempotent: it adds/removes In/Out DATs to match the headers and get-or-creates parameters, never overwriting user values or destroying parameters.
+- A node COMP: read-only `Nodetype` par; one `in_<socket>` In DAT per input (`connectorder` = header order); one `graph_<socket>` Script DAT + `out_<socket>` Out DAT per output (`graph`/`out_graph` for MaterialOutput); one custom parameter per non-closure input (`float` -> Float, `vec2` -> XY, `vec3`/`vec4` -> RGB/RGBA, or XYZ/XYZW when the socket name looks spatial: vector, normal, uv, ...). All Script DATs share `core/td_node_callbacks.py`, which reads the snippet header at cook time, so editing a header re-cooks its nodes.
+- `EvaluateShader`: `in_graph` -> `vertex`/`pixel` Script DATs (`core/td_eval_callbacks.py`, snippets read from `/matx/snippets`) -> `glsl_mat`. Unconnected it only warns.
+- `/matx_demo` rebuilds `examples/noise_pbr.json` from copied nodes and renders it on a sphere: both shaders compile and link, the vertex shader is identical to `examples/noise_pbr.vert`, the lighting matches a TD PBR MAT on the same scene, and parameter changes regenerate the shader live.
+- Verified: `TDInstanceTexCoord(TDTexCoord(0u))`, `read_literal` (including RGB tuplets), automatic Script DAT dependencies on In DAT text and custom parameters, In DAT `connectorder`.
+- Script DAT text output: set `textFormat = True` **before** assigning `.text`, otherwise tabs split the text into table cells.
 
-**Next:** build the `.toe` (Phase 0): a GLSL MAT fed by Text DATs linked to the generated example files, confirm it compiles and lights correctly, fix the snippets above; then the first node COMPs and the Evaluate Shader COMP wrapping `codegen.generate`.
+**Next:** more nodes (Math, Image Texture with sampler manifest, Color Ramp, Normal Map, Mix/Add Shader), and surfacing the GLSL MAT compile errors on the EvaluateShader COMP.
 
 ## 4. Key technical decisions
 
