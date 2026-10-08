@@ -2,6 +2,7 @@
 in vec3 vUV;
 in vec3 vWorldPos;
 in vec3 vWorldNormal;
+in flat int cameraIndex;
 
 layout(location = 0) out vec4 fragColor;
 
@@ -37,7 +38,7 @@ void matx_PrincipledBSDF(vec3 base_color, float metallic, float roughness, vec3 
 	vec3 diffuseColor = base_color * (1.0 - metallic);
 	vec3 specularColor = mix(vec3(0.04), base_color, metallic);
 	vec3 N = normalize(vWorldNormal);
-	vec3 V = normalize(uTDMats[TDCameraIndex()].camInverse[3].xyz - vWorldPos);
+	vec3 V = normalize(uTDMats[cameraIndex].camInverse[3].xyz - vWorldPos);
 
 	vec3 diffuse = vec3(0.0);
 	vec3 specular = vec3(0.0);

@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit -q -m 'Pass camera index to the pixel stage as a flat varying; add EmissionShader and ShaderToRGB nodes *)"
+    ]
+  }
+}

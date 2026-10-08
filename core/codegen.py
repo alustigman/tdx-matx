@@ -36,6 +36,8 @@ ATTRIBUTES = {
 	'world_normal': ('vec3', 'vWorldNormal', 'normalize(TDDeformNorm(TDNormal()))'),
 	'uv':           ('vec3', 'vUV',          'TDTexCoord(0u)'),
 	'color':        ('vec4', 'vColor',       'TDPointColor()'),
+	# TDCameraIndex() only exists in the vertex stage, so the pixel stage gets it as a flat varying
+	'camera_index': ('flat int', 'cameraIndex', 'TDCameraIndex()'),
 }
 
 PIXEL_PREAMBLE = '''\

@@ -122,7 +122,7 @@ Algorithm:
 - A failing node writes `"error"` into the graph instead of raising; it propagates downstream and `generate` raises it.
 
 **Not verified yet (needs TouchDesigner, Phase 0):** these are written from the wiki and memory of TD's default PBR MAT and may need adjusting:
-- `uTDMats[TDCameraIndex()].camInverse[3].xyz` for the camera position (the wiki list shows `worldCam`, `cam`, ... but not `camInverse`).
+- `uTDMats[cameraIndex].camInverse[3].xyz` for the camera position (the wiki list shows `worldCam`, `cam`, ... but not `camInverse`). `TDCameraIndex()` is vertex-stage only (confirmed), so it is passed as the flat varying `cameraIndex` via the `camera_index` attribute.
 - Return type and arguments of `TDEnvLightingPBR` (written as `void` with `inout` contributions) and of `TDLightingPBR`.
 - `TDTexCoord(0u)`, `TDDeformNorm`, `TDDither`, `TDAlphaTest` usage and the vertex-shader basics (`TDDeform` -> `TDWorldToProj`).
 - Custom parameter naming/tuplet lookup in `read_literal`.

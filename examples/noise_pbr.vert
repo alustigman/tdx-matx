@@ -2,6 +2,7 @@
 out vec3 vUV;
 out vec3 vWorldPos;
 out vec3 vWorldNormal;
+out flat int cameraIndex;
 
 void main()
 {
@@ -10,4 +11,5 @@ void main()
 	vUV = TDTexCoord(0u);
 	vWorldPos = worldSpaceVert.xyz;
 	vWorldNormal = normalize(TDDeformNorm(TDNormal()));
+	cameraIndex = TDCameraIndex();
 }

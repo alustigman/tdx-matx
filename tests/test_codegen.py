@@ -19,9 +19,13 @@ def example():
 class Codegen(unittest.TestCase):
 	def test_example_generates(self):
 		r = codegen.generate(example(), SNIPS, LIB)
-		self.assertEqual(sorted(r['attributes']), ['uv', 'world_normal', 'world_pos'])
+		self.assertEqual(sorted(r['attributes']), ['camera_index', 'uv', 'world_normal', 'world_pos'])
 		self.assertIn('out vec3 vUV;', r['vertex'])
 		self.assertIn('in vec3 vWorldNormal;', r['pixel'])
+		self.assertIn('out flat int cameraIndex;', r['vertex'])
+		self.assertIn('in flat int cameraIndex;', r['pixel'])
+		self.assertIn('cameraIndex = TDCameraIndex();', r['vertex'])
+		self.assertNotIn('TDCameraIndex', r['pixel'])
 		self.assertIn('matx_PrincipledBSDF(', r['pixel'])
 		self.assertIn('fragColor = TDOutputSwizzle', r['pixel'])
 		o = r['order']

@@ -6,14 +6,14 @@
 // @in float alpha = 1.0
 // @in float ambient_occlusion = 1.0
 // @out closure bsdf
-// @attr world_pos world_normal
+// @attr world_pos world_normal camera_index
 void matx_PrincipledBSDF(vec3 base_color, float metallic, float roughness, vec3 emission,
                          float alpha, float ambient_occlusion, out MatxClosure bsdf)
 {
 	vec3 diffuseColor = base_color * (1.0 - metallic);
 	vec3 specularColor = mix(vec3(0.04), base_color, metallic);
 	vec3 N = normalize(vWorldNormal);
-	vec3 V = normalize(uTDMats[TDCameraIndex()].camInverse[3].xyz - vWorldPos);
+	vec3 V = normalize(uTDMats[cameraIndex].camInverse[3].xyz - vWorldPos);
 
 	vec3 diffuse = vec3(0.0);
 	vec3 specular = vec3(0.0);
