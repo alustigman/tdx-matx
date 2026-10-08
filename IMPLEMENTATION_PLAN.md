@@ -121,11 +121,9 @@ Algorithm:
 - Snippet defaults are `// @in vec3 name = 0.5` (one number splats) and are used when the JSON has no literal.
 - A failing node writes `"error"` into the graph instead of raising; it propagates downstream and `generate` raises it.
 
-**Not verified yet (needs TouchDesigner, Phase 0):** these are written from the wiki and memory of TD's default PBR MAT and may need adjusting:
-- `uTDMats[cameraIndex].camInverse[3].xyz` for the camera position (the wiki list shows `worldCam`, `cam`, ... but not `camInverse`). `TDCameraIndex()` is vertex-stage only (confirmed), so it is passed as the flat varying `cameraIndex` via the `camera_index` attribute.
-- Return type and arguments of `TDEnvLightingPBR` (written as `void` with `inout` contributions) and of `TDLightingPBR`.
-- `TDTexCoord(0u)`, `TDDeformNorm`, `TDDither`, `TDAlphaTest` usage and the vertex-shader basics (`TDDeform` -> `TDWorldToProj`).
-- Custom parameter naming/tuplet lookup in `read_literal`.
+**Reference:** the generated shaders now follow TD's own Phong/PBR MAT export (`basicPBRVert.vert`, `basicPBRFrag.frag`): `Vertex` interface block (`oVert` / `iVert`), picking guard + `TDWritePickingValues()`, `TDInstanceColor/TexCoord`, `TDUVUnwrapCoord`, `TDCheckDiscard`, `TDPixelColor`, `TDFrontFacing` normal flip, 0.08 specular level, roughness clamp, premultiplied alpha, and the output tail `TDFog` -> `TDDither` -> `TDAlphaTest` -> `TDConvertColorSpace` -> `TDOutputSwizzle` with the extra color buffers zeroed. `TDCameraIndex()` is vertex-only, so it travels as `iVert.cameraIndex` (the `camera_index` attribute, always emitted because fog needs it).
+
+**Not verified yet (needs TouchDesigner):** `TDInstanceTexCoord(TDTexCoord(0u))` for the `uv` attribute, and `read_literal`'s custom-parameter/tuplet lookup. Everything else was copied from the TD export.
 
 **Next:** build the `.toe` (Phase 0): a GLSL MAT fed by Text DATs linked to the generated example files, confirm it compiles and lights correctly, fix the snippets above; then the first node COMPs and the Evaluate Shader COMP wrapping `codegen.generate`.
 

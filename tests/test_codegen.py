@@ -19,15 +19,23 @@ def example():
 class Codegen(unittest.TestCase):
 	def test_example_generates(self):
 		r = codegen.generate(example(), SNIPS, LIB)
-		self.assertEqual(sorted(r['attributes']), ['camera_index', 'uv', 'world_normal', 'world_pos'])
-		self.assertIn('out vec3 vUV;', r['vertex'])
-		self.assertIn('in vec3 vWorldNormal;', r['pixel'])
-		self.assertIn('out flat int cameraIndex;', r['vertex'])
-		self.assertIn('in flat int cameraIndex;', r['pixel'])
-		self.assertIn('cameraIndex = TDCameraIndex();', r['vertex'])
-		self.assertNotIn('TDCameraIndex', r['pixel'])
-		self.assertIn('matx_PrincipledBSDF(', r['pixel'])
-		self.assertIn('fragColor = TDOutputSwizzle', r['pixel'])
+		self.assertEqual(sorted(r['attributes']),
+		                 ['camera_index', 'color', 'uv', 'world_normal', 'world_pos'])
+		v, p = r['vertex'], r['pixel']
+		self.assertIn('out Vertex', v)
+		self.assertIn('} oVert;', v)
+		self.assertIn('oVert.cameraIndex = TDCameraIndex();', v)
+		self.assertIn('TDWritePickingValues();', v)
+		self.assertIn('in Vertex', p)
+		self.assertIn('flat int cameraIndex;', p)
+		self.assertIn('} iVert;', p)
+		self.assertNotIn('TDCameraIndex', p)
+		self.assertIn('matx_PrincipledBSDF(', p)
+		for call in ('#include <TDColorSpace>', 'TDCheckDiscard();',
+		             'TDFog(finalColor, iVert.worldSpacePos.xyz, iVert.cameraIndex)',
+		             'TDDither(finalColor)', 'TDAlphaTest(finalColor.a)',
+		             'TDConvertColorSpace(outVal)', 'oFragColor[0] = TDOutputSwizzle(outVal)'):
+			self.assertIn(call, p)
 		o = r['order']
 		self.assertLess(o.index('n_uv'), o.index('n_noise'))
 		self.assertLess(o.index('n_mix'), o.index('n_bsdf'))
@@ -39,7 +47,7 @@ class Codegen(unittest.TestCase):
 			del g['nodes'][k]
 		g['nodes']['n_mix']['inputs']['fac'] = 0.25
 		r = codegen.generate(g, SNIPS, LIB)
-		self.assertNotIn('vUV', r['vertex'])
+		self.assertNotIn('oVert.uv', r['vertex'])
 		self.assertNotIn('matx_NoiseTexture', r['pixel'])
 
 	def test_conversion_and_literals(self):

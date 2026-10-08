@@ -3,5 +3,5 @@
 // @attr uv
 void matx_TexCoord(out vec3 uv)
 {
-	uv = vUV;
+	uv = iVert.uv;
 }
