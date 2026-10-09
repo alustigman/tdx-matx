@@ -85,6 +85,14 @@ class Codegen(unittest.TestCase):
 		with self.assertRaisesRegex(codegen.MatxError, 'boom'):
 			codegen.generate(g, SNIPS, LIB)
 
+	def test_fallback_is_complete(self):
+		# EvaluateShader outputs this on any error; empty shaders crash TD's GLSL MAT
+		fb = codegen.fallback()
+		self.assertIn('gl_Position = TDWorldToProj', fb['vertex'])
+		self.assertIn('TDWritePickingValues', fb['vertex'])
+		self.assertIn('oFragColor[0] = TDOutputSwizzle', fb['pixel'])
+		self.assertNotIn('iVert', fb['pixel'])
+
 
 class Graph(unittest.TestCase):
 	SPEC = {'type': 'MixColor', 'inputs': {'fac': 'float', 'a': 'vec3', 'b': 'vec3'},

@@ -387,6 +387,42 @@ def _pixel(graph, root, root_node, snippets, body, attrs, libs, used_types, out_
 	return '\n'.join(lines) + '\n'
 
 
+FALLBACK_VERTEX = '''\
+// tdx-matx fallback shader: the graph could not be generated (see the vertex/pixel DAT errors)
+void main()
+{
+	vec4 worldSpacePos = TDDeform(TDPos());
+	vec3 uvUnwrapCoord = TDInstanceTexCoord(TDUVUnwrapCoord());
+	gl_Position = TDWorldToProj(worldSpacePos, uvUnwrapCoord);
+
+#ifdef TD_PICKING_ACTIVE
+	TDWritePickingValues();
+#endif
+}
+'''
+
+FALLBACK_PIXEL = '''\
+// tdx-matx fallback shader: the graph could not be generated (see the vertex/pixel DAT errors)
+layout(location = 0) out vec4 oFragColor[TD_NUM_COLOR_BUFFERS];
+
+void main()
+{
+	TDCheckDiscard();
+	oFragColor[0] = TDOutputSwizzle(vec4(1.0, 0.0, 1.0, 1.0));
+	for (int i = 1; i < TD_NUM_COLOR_BUFFERS; i++)
+	{
+		oFragColor[i] = vec4(0.0);
+	}
+}
+'''
+
+
+def fallback():
+	"""A valid flat-magenta shader pair. A GLSL MAT must never get empty or broken source:
+	TouchDesigner crashes cooking a rendered GLSL MAT whose shader DATs are empty."""
+	return {'vertex': FALLBACK_VERTEX, 'pixel': FALLBACK_PIXEL}
+
+
 if __name__ == '__main__':
 	import json, os, sys
 	root = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..')

@@ -131,6 +131,7 @@ Algorithm:
 - `/matx_demo` rebuilds `examples/noise_pbr.json` from copied nodes and renders it on a sphere: both shaders compile and link, the vertex shader is identical to `examples/noise_pbr.vert`, the lighting matches a TD PBR MAT on the same scene, and parameter changes regenerate the shader live.
 - Verified: `TDInstanceTexCoord(TDTexCoord(0u))`, `read_literal` (including RGB tuplets), automatic Script DAT dependencies on In DAT text and custom parameters, In DAT `connectorder`.
 - Script DAT text output: set `textFormat = True` **before** assigning `.text`, otherwise tabs split the text into table cells.
+- **TouchDesigner crashes cooking a rendered GLSL MAT whose shader DATs are empty** (three crash dumps, all in `glsl_mat` cook). EvaluateShader therefore never outputs empty source: on a missing graph or any generation error (e.g. the graph does not end in MaterialOutput) it outputs `codegen.fallback()`, a flat magenta shader, and reports the error on its `vertex`/`pixel` DATs.
 
 **Next:** more nodes (Math, Image Texture with sampler manifest, Color Ramp, Normal Map, Mix/Add Shader), and surfacing the GLSL MAT compile errors on the EvaluateShader COMP.
 
