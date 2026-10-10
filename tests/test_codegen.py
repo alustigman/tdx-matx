@@ -93,6 +93,47 @@ class Codegen(unittest.TestCase):
 		self.assertIn('oFragColor[0] = TDOutputSwizzle', fb['pixel'])
 		self.assertNotIn('iVert', fb['pixel'])
 
+	def _sampler_graph(self, top='/project1/moviefilein1'):
+		g = example()
+		g['nodes']['n_tex'] = {'type': 'Sampler', 'inputs': {}, 'samplers': {'image': top} if top else {}}
+		g['nodes']['n_mix']['inputs']['a'] = ['n_tex', 'color']
+		return g
+
+	def test_sampler_uniform_and_binding(self):
+		r = codegen.generate(self._sampler_graph(), SNIPS, LIB)
+		self.assertEqual(r['samplers'], [['sMatx_n_tex_image', '/project1/moviefilein1']])
+		p = r['pixel']
+		self.assertIn('uniform sampler2D sMatx_n_tex_image;', p)
+		self.assertIn('matx_Sampler(sMatx_n_tex_image, iVert.uv, n_tex_color, n_tex_alpha);', p)
+		self.assertLess(p.index('uniform sampler2D'), p.index('void matx_Sampler'))
+
+	def test_sampler_without_top_fails(self):
+		with self.assertRaisesRegex(codegen.MatxError, 'no TOP for sampler'):
+			codegen.generate(self._sampler_graph(top=None), SNIPS, LIB)
+
+	def test_attribute_default_adds_attribute(self):
+		g = self._sampler_graph()
+		for k in ('n_uv', 'n_noise'):
+			del g['nodes'][k]
+		g['nodes']['n_mix']['inputs']['fac'] = 0.5
+		r = codegen.generate(g, SNIPS, LIB)
+		self.assertIn('uv', r['attributes'])
+		self.assertIn('oVert.uv = ', r['vertex'])
+		g['nodes']['n_tex']['inputs']['vector'] = [0.5, 0.5, 0.0]
+		r = codegen.generate(g, SNIPS, LIB)
+		self.assertNotIn('uv', r['attributes'])
+
+	def test_no_samplers_by_default(self):
+		r = codegen.generate(example(), SNIPS, LIB)
+		self.assertEqual(r['samplers'], [])
+		self.assertNotIn('uniform sampler2D', r['pixel'])
+
+	def test_bad_snippet_headers(self):
+		with self.assertRaisesRegex(codegen.MatxError, '@sampler'):
+			codegen.parse_snippet('// @type X\n// @sampler samplerCube s\nvoid matx_X() {}')
+		with self.assertRaisesRegex(codegen.MatxError, 'neither'):
+			codegen.parse_snippet('// @type X\n// @in vec3 v = bogus\nvoid matx_X() {}')
+
 
 class Graph(unittest.TestCase):
 	SPEC = {'type': 'MixColor', 'inputs': {'fac': 'float', 'a': 'vec3', 'b': 'vec3'},
@@ -121,6 +162,16 @@ class Graph(unittest.TestCase):
 		spec2 = {'type': 'Math2', 'inputs': {'x': 'float', 'y': 'float'}, 'outputs': {'r': 'float'}}
 		g = matx.make_node(spec2, 'nm', {}, {'x': l, 'y': r})
 		self.assertEqual(set(g['nodes']), {'n0', 'nl', 'nr', 'nm'})
+
+	def test_samplers_recorded_on_node(self):
+		spec = matx.spec_from_snippet(SNIPS['Sampler'])
+		self.assertEqual(spec['samplers'], {'image': 'sampler2D'})
+		g = matx.make_node(spec, 'n1', {}, {}, samplers={'image': '/a/b', 'other': '/x'})
+		self.assertEqual(g['nodes']['n1']['samplers'], {'image': '/a/b'})
+		g = matx.make_node(spec, 'n1', {}, {}, samplers={'image': None})
+		self.assertEqual(g['nodes']['n1']['samplers'], {})
+		g = matx.make_node(self.SPEC, 'n2', {}, {})
+		self.assertNotIn('samplers', g['nodes']['n2'])
 
 	def test_error_propagates_and_roundtrip(self):
 		bad = {'version': 1, 'nodes': {}, 'output': None, 'error': 'x'}

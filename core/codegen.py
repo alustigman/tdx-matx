@@ -8,12 +8,18 @@ Snippet files (glsl/nodes/*.glsl) start with a header of `// @key value` lines:
     // @type  NoiseTexture
     // @in    vec3 vector = 0.0
     // @in    float scale = 5.0
+    // @in    vec3 coord = uv    (a default naming an ATTRIBUTE reads it when unconnected)
     // @out   float fac
     // @attr  uv                 (vertex attribute the snippet reads, see ATTRIBUTES)
     // @requires hash            (helper file glsl/lib/hash.glsl, included once)
+    // @sampler sampler2D image  (a texture per node instance, see SAMPLER_TYPES)
 
-The body must define `void matx_<type>(<ins...>, out <outs...>)` with parameters
-in the order the @in then @out lines appear.
+The body must define `void matx_<type>(<samplers...>, <ins...>, out <outs...>)` with parameters
+in the order the @sampler, @in, then @out lines appear.
+
+A node with samplers carries `"samplers": {name: TOP path}` in the graph. Each one becomes a
+`uniform sampler2D sMatx_<node>_<name>` in the pixel shader, and generate() returns the
+(uniform, TOP path) pairs for the host to bind on the GLSL MAT's Samplers page.
 """
 import re
 
@@ -22,6 +28,7 @@ TYPES = ('float', 'vec2', 'vec3', 'vec4', CLOSURE)
 GLSL_TYPE = {'float': 'float', 'vec2': 'vec2', 'vec3': 'vec3', 'vec4': 'vec4',
              CLOSURE: 'MatxClosure'}
 COMPONENTS = {'float': 1, 'vec2': 2, 'vec3': 3, 'vec4': 4}
+SAMPLER_TYPES = ('sampler2D',)
 
 
 class MatxError(Exception):
@@ -54,6 +61,12 @@ struct MatxClosure {
 # --------------------------------------------------------------------------
 
 def _parse_default(type_, text):
+	if re.match(r'[A-Za-z_]\w*$', text):
+		if text not in ATTRIBUTES:
+			raise MatxError('default %r is neither a number nor an attribute' % text)
+		if ATTRIBUTES[text][0] not in COMPONENTS:
+			raise MatxError('attribute %r cannot be an input default' % text)
+		return text   # attribute name: read iVert.<member> when the input is unconnected
 	nums = [float(t) for t in text.split()]
 	n = COMPONENTS[type_]
 	if len(nums) == 1:
@@ -64,8 +77,9 @@ def _parse_default(type_, text):
 
 
 def parse_snippet(text):
-	"""Returns dict(type, ins=[(type,name,default)], outs=[(type,name)], attrs, requires, body)."""
-	snip = {'type': None, 'ins': [], 'outs': [], 'attrs': [], 'requires': []}
+	"""Returns dict(type, samplers=[(type,name)], ins=[(type,name,default)], outs=[(type,name)],
+	attrs, requires, body). A default is a float, a list of floats, an attribute name or None."""
+	snip = {'type': None, 'samplers': [], 'ins': [], 'outs': [], 'attrs': [], 'requires': []}
 	body = []
 	for line in text.splitlines():
 		m = re.match(r'\s*//\s*@(\w+)\s*(.*?)\s*$', line)
@@ -93,6 +107,11 @@ def parse_snippet(text):
 				snip['attrs'].append(a)
 		elif key == 'requires':
 			snip['requires'].extend(rest.split())
+		elif key == 'sampler':
+			m2 = re.match(r'(\w+)\s+(\w+)$', rest)
+			if not m2 or m2.group(1) not in SAMPLER_TYPES:
+				raise MatxError('bad @sampler line: %r' % line)
+			snip['samplers'].append((m2.group(1), m2.group(2)))
 		else:
 			raise MatxError('unknown snippet key @%s' % key)
 	if not snip['type']:
@@ -245,6 +264,7 @@ def generate(graph, snippets, lib=None):
 	seen_lib = set()
 	body = []
 	out_types = {}   # var name -> glsl abstract type
+	samplers = []    # (glsl type, uniform name, TOP path)
 
 	for nid in order:
 		node = nodes[nid]
@@ -260,11 +280,25 @@ def generate(graph, snippets, lib=None):
 			_collect_lib(sn['requires'], lib, seen_lib, libs)
 
 		args = []
+		for (ty, name) in sn['samplers']:
+			path = node.get('samplers', {}).get(name)
+			if not path:
+				raise MatxError('node %s (%s): no TOP for sampler %r' % (nid, t, name))
+			uniform = 'sMatx_' + _var(nid, name)
+			samplers.append((ty, uniform, path))
+			args.append(uniform)
 		for (ty, name, default) in sn['ins']:
 			v = node.get('inputs', {}).get(name, default)
 			if v is None:
 				raise MatxError('node %s (%s): input %r has no value' % (nid, t, name))
-			if is_link(v):
+			if isinstance(v, str):
+				if v not in ATTRIBUTES:
+					raise MatxError('node %s (%s): unknown attribute %r' % (nid, t, v))
+				if v not in attrs:
+					attrs.append(v)
+				a_type, member, _ = ATTRIBUTES[v]
+				args.append(convert('iVert.' + member, a_type, ty))
+			elif is_link(v):
 				src_id, src_sock = v
 				key = _var(src_id, src_sock)
 				if key not in out_types:
@@ -280,8 +314,9 @@ def generate(graph, snippets, lib=None):
 			outs.append(var)
 		body.append('\tmatx_%s(%s);' % (t, ', '.join(args + outs)))
 
-	pixel = _pixel(graph, root, nodes[root], snippets, body, attrs, libs, used_types, out_types)
-	return {'vertex': _vertex(attrs), 'pixel': pixel, 'attributes': attrs, 'order': order}
+	pixel = _pixel(graph, root, nodes[root], snippets, body, attrs, libs, used_types, out_types, samplers)
+	return {'vertex': _vertex(attrs), 'pixel': pixel, 'attributes': attrs, 'order': order,
+	        'samplers': [[u, path] for (_, u, path) in samplers]}
 
 
 def _ordered(attrs):
@@ -358,7 +393,7 @@ def _vertex(attrs):
 	        + '\nvoid main()\n{\n' + VERTEX_HEAD + '\n' + assigns + '\n' + VERTEX_TAIL + '}\n')
 
 
-def _pixel(graph, root, root_node, snippets, body, attrs, libs, used_types, out_types):
+def _pixel(graph, root, root_node, snippets, body, attrs, libs, used_types, out_types, samplers):
 	surf = root_node.get('inputs', {}).get('surface')
 	if not is_link(surf):
 		raise MatxError('MaterialOutput.surface must be connected')
@@ -373,8 +408,10 @@ def _pixel(graph, root, root_node, snippets, body, attrs, libs, used_types, out_
 	lines = ['// generated by tdx-matx -- do not edit', '#include <TDColorSpace>', '',
 	         _block('in Vertex', 'iVert', attrs),
 	         '// Output variable for the color',
-	         'layout(location = 0) out vec4 oFragColor[TD_NUM_COLOR_BUFFERS];', '',
-	         PIXEL_PREAMBLE]
+	         'layout(location = 0) out vec4 oFragColor[TD_NUM_COLOR_BUFFERS];', '']
+	if samplers:
+		lines += ['uniform %s %s;' % (ty, u) for (ty, u, _) in samplers] + ['']
+	lines += [PIXEL_PREAMBLE]
 	lines += libs
 	for t in used_types:
 		if t == 'MaterialOutput':

@@ -9,7 +9,7 @@ A node COMP is expected to contain:
   - one Script DAT per output socket, calling build_node(scriptOp, NODE, out_socket)
 and to carry one custom parameter per literal input, named after the socket with
 underscores removed and capitalised (`base_color` -> `Basecolor`; vectors use TD
-tuplets, e.g. Basecolorr/g/b).
+tuplets, e.g. Basecolorr/g/b), plus one TOP parameter per sampler, named the same way.
 """
 import json
 
@@ -55,14 +55,17 @@ def spec_from_snippet(snip):
 	"""Node spec (see make_node) from a codegen.parse_snippet result."""
 	return {'type': snip['type'],
 	        'inputs': {name: t for (t, name, _) in snip['ins']},
-	        'outputs': {name: t for (t, name) in snip['outs']}}
+	        'outputs': {name: t for (t, name) in snip['outs']},
+	        'samplers': {name: t for (t, name) in snip['samplers']}}
 
 
-def make_node(spec, node_id, literals, upstream, out_socket=None):
+def make_node(spec, node_id, literals, upstream, out_socket=None, samplers=None):
 	"""
-	spec:      {'type': str, 'inputs': {socket: type}, 'outputs': {socket: type}}
+	spec:      {'type': str, 'inputs': {socket: type}, 'outputs': {socket: type},
+	            'samplers': {name: type} (optional)}
 	literals:  {socket: value} from the COMP's parameters
 	upstream:  {socket: graph} parsed graph of each connected input (absent/empty = unconnected)
+	samplers:  {name: TOP path} for the spec's samplers; unset ones are left out
 	Returns the graph including this node, with `output` -> [node_id, out_socket].
 	"""
 	outputs = list(spec.get('outputs', {}))
@@ -86,6 +89,9 @@ def make_node(spec, node_id, literals, upstream, out_socket=None):
 			inputs[socket] = literals[socket]
 	merged = merge_graphs(graphs)
 	merged['nodes'][node_id] = {'type': spec['type'], 'inputs': inputs}
+	if spec.get('samplers'):
+		merged['nodes'][node_id]['samplers'] = {
+			name: path for name, path in (samplers or {}).items() if name in spec['samplers'] and path}
 	merged['output'] = [node_id, out_socket]
 	if errors:
 		merged['error'] = errors[0]   # first upstream failure wins; Evaluate Shader reports it
@@ -112,6 +118,13 @@ def read_literal(comp, socket, type_):
 	return vals[0] if type_ == 'float' else vals
 
 
+def read_top_path(comp, name):
+	"""Path of the TOP set in a node COMP's sampler parameter, or None."""
+	par = comp.par[par_name(name)]
+	top = par.eval() if par is not None else None
+	return top.path if top is not None and getattr(top, 'isTOP', False) else None
+
+
 def build_node(scriptOp, spec, out_socket=None):
 	"""Standard onCook body for a node's Script DAT."""
 	comp = scriptOp.parent()
@@ -123,8 +136,9 @@ def build_node(scriptOp, spec, out_socket=None):
 			v = read_literal(comp, socket, type_)
 			if v is not None:
 				literals[socket] = v
+	samplers = {name: read_top_path(comp, name) for name in spec.get('samplers', {})}
 	try:
-		g = make_node(spec, 'n%d' % comp.id, literals, upstream, out_socket)
+		g = make_node(spec, 'n%d' % comp.id, literals, upstream, out_socket, samplers)
 	except (MatxError, ValueError) as e:
 		g = empty_graph()
 		g['error'] = '%s: %s' % (comp.path, e)
