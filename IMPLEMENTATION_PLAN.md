@@ -86,7 +86,7 @@ Algorithm:
 
 ### 1.6 Textures and dynamic values
 - The **Sampler** node (Blender's Image Texture) has a TOP parameter. Evaluate Shader gathers these into its `samplers` table and binds them on the GLSL MAT's Samplers page, one block per Sampler node (implemented, see 3b).
-- Constants are baked into the shader as literals (recompile on change). Uniform exposure via the MAT's Vectors page is a future feature, see Decisions.
+- Constants are baked into the shader as literals (recompile on change), unless the node's **As Uniform** toggle is on (Value, RGB): then the input is a uniform bound on the MAT's Colors page (colours) or Vectors page (anything else), so it can be animated without recompiling (see 3b).
 
 ## 2. Node catalogue (target)
 
@@ -122,7 +122,7 @@ Algorithm:
 - Alpha/blending handling (alpha test, OIT via `TDCheckDiscard`).
 
 **Phase 4 — Breadth and polish**
-- Rest of catalogue, uniform exposure toggle, vertex-stage nodes (displacement), instancing support.
+- Rest of catalogue, As Uniform on more nodes (any `@in` can be marked `@uniform`), vertex-stage nodes (displacement), instancing support.
 - Palette entries / consistent component styling and socket colors, docs per node, optional node-creation helper (script that generates a node COMP from a declarative spec to keep all `.tox` consistent).
 
 ## 3b. Status
@@ -138,6 +138,7 @@ Algorithm:
 - Colors are `vec3` in v1. Node ids must start with a letter (`n<td id>`).
 - Snippet defaults are `// @in vec3 name = 0.5` (one number splats) and are used when the JSON has no literal. A default can instead name a vertex attribute (`// @in vec3 vector = uv`): the unconnected input reads `iVert.<member>`, the attribute is emitted only then, and the node COMP gets a connector but no parameter for it.
 - Textures: `// @sampler sampler2D image` declares a texture per node instance; the function takes the samplers first (`matx_Sampler(sampler2D image, vec3 vector, out ...)`). The node's graph entry carries `"samplers": {"image": "<TOP path>"}`, codegen declares `uniform sampler2D sMatx_<node>_<name>;` and returns the `[uniform, TOP path]` pairs as `samplers`. A sampler without a TOP is a generation error.
+- Uniforms: `// @uniform <input>` marks a non-closure `@in` that may become a uniform (Value and RGB so far). The builder gives such a node an `Asuniform` toggle (Inputs page). When it is on, the node's Script DAT records `"uniforms": {"<input>": ["<COMP path>", "<Par name>"]}` instead of the literal and does not read the parameter's value, so animating it never recooks the graph. A connected input stays a link. Codegen declares `uniform <type> uMatx_<node>_<input>;` and returns `[uniform, COMP path, par name, page]` rows as `uniforms`. A colour input (`codegen.is_color`: vec3/vec4 without a spatial name, the same rule that gives the node an RGB parameter) goes on the Colors page, which always feeds a `vec4` (a vec3 input passes `.rgb`); anything else goes on the Vectors page. EvaluateShader's `uniforms` table + `uniform_exec` DAT Execute (`apply_uniforms()`) size glsl_mat's `color` and `vec` sequences to them (TD keeps at least one block on each) and set each `color<i>rgb<r|g|b>` / `vec<i>value<xyzw>` to an expression `op('<path relative to the MAT>').par.<Par><component>`; an unused colour alpha stays at its constant default 1. The Colors page applies no colour-space conversion: a uniform renders identically to the literal. Verified live on 2025.33230: changing RGB1's colour with As Uniform on changes the render while the graph, pixel, vertex and uniforms DATs do not recook. Copied nodes are upgraded with `td_builder.ensure_node_contents(comp, snippet, report)`.
 - A failing node writes `"error"` into the graph instead of raising; it propagates downstream and `generate` raises it.
 
 **Reference:** the generated shaders now follow TD's own Phong/PBR MAT export (`basicPBRVert.vert`, `basicPBRFrag.frag`): `Vertex` interface block (`oVert` / `iVert`), picking guard + `TDWritePickingValues()`, `TDInstanceColor/TexCoord`, `TDUVUnwrapCoord`, `TDCheckDiscard`, `TDPixelColor`, `TDFrontFacing` normal flip, 0.08 specular level, roughness clamp, premultiplied alpha, and the output tail `TDFog` -> `TDDither` -> `TDAlphaTest` -> `TDConvertColorSpace` -> `TDOutputSwizzle` with the extra color buffers zeroed. `TDCameraIndex()` is vertex-only, so it travels as `iVert.cameraIndex` (the `camera_index` attribute, always emitted because fog needs it).
@@ -182,7 +183,7 @@ Implemented inside `codegen.generate` (missing output, wrong root type, missing 
 ## 5. Decisions
 
 1. **Closures:** lit-radiance closures (each shading node runs its own lighting; Mix/Add Shader are exact). Revisit only if cost becomes a problem.
-2. **Constants:** baked into the shader as literals in v1. Uniform exposure (no recompile on tweak) is a later feature; keep codegen behind a single `emit_value(node, socket)` function so switching a socket to a uniform later is local.
+2. **Constants:** baked into the shader as literals by default. Inputs a snippet marks `@uniform` can instead be bound as uniforms per node (the As Uniform toggle), so tweaking or animating them does not recompile.
 3. **Socket width:** one In DAT per input socket; width is not a concern.
 4. **Stages:** no vertex-stage *nodes* in v1 (no displacement), but Evaluate Shader still emits a **vertex shader**. It is generated from the graph's requirements: nodes declare the attributes they need (`uv`, `normal`, `position`, `tangent`, `color`, ...), and the generator adds the matching `out` varyings in the vertex shader (filled from `TDPos()`, `TDNormal()`, `TDTexCoord()`, `TDPointColor()`, with `TDDeform` / `TDWorldToProj` for position) and the matching `in` declarations in the pixel shader. Unused attributes are not emitted.
 5. **TD version:** latest TouchDesigner release; no backward compatibility work.

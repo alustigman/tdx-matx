@@ -10,6 +10,9 @@ A node COMP is expected to contain:
 and to carry one custom parameter per literal input, named after the socket with
 underscores removed and capitalised (`base_color` -> `Basecolor`; vectors use TD
 tuplets, e.g. Basecolorr/g/b), plus one TOP parameter per sampler, named the same way.
+A node whose snippet declares @uniform inputs also carries an `Asuniform` toggle: when on, those
+inputs are recorded as uniform references (COMP path, parameter name) instead of their values,
+so animating the parameter does not change the graph or recompile the shader.
 """
 import json
 
@@ -56,16 +59,19 @@ def spec_from_snippet(snip):
 	return {'type': snip['type'],
 	        'inputs': {name: t for (t, name, _) in snip['ins']},
 	        'outputs': {name: t for (t, name) in snip['outs']},
-	        'samplers': {name: t for (t, name) in snip['samplers']}}
+	        'samplers': {name: t for (t, name) in snip['samplers']},
+	        'uniforms': list(snip.get('uniforms', []))}
 
 
-def make_node(spec, node_id, literals, upstream, out_socket=None, samplers=None):
+def make_node(spec, node_id, literals, upstream, out_socket=None, samplers=None, uniforms=None):
 	"""
 	spec:      {'type': str, 'inputs': {socket: type}, 'outputs': {socket: type},
 	            'samplers': {name: type} (optional)}
 	literals:  {socket: value} from the COMP's parameters
 	upstream:  {socket: graph} parsed graph of each connected input (absent/empty = unconnected)
 	samplers:  {name: TOP path} for the spec's samplers; unset ones are left out
+	uniforms:  {socket: [op path, par name]} for unconnected inputs bound to a uniform; they
+	           replace the literal (a connected input stays a link)
 	Returns the graph including this node, with `output` -> [node_id, out_socket].
 	"""
 	outputs = list(spec.get('outputs', {}))
@@ -74,7 +80,7 @@ def make_node(spec, node_id, literals, upstream, out_socket=None, samplers=None)
 	elif out_socket not in outputs:
 		raise MatxError('%s has no output %r' % (spec['type'], out_socket))
 
-	graphs, inputs, errors = [], {}, []
+	graphs, inputs, errors, node_uniforms = [], {}, [], {}
 	for socket in spec['inputs']:
 		g = upstream.get(socket)
 		if g is not None and g.get('error'):
@@ -85,10 +91,14 @@ def make_node(spec, node_id, literals, upstream, out_socket=None, samplers=None)
 			if src_sock is None:
 				raise MatxError('%s.%s connected to a node without outputs' % (spec['type'], socket))
 			inputs[socket] = [src_id, src_sock]
+		elif socket in (uniforms or {}):
+			node_uniforms[socket] = list(uniforms[socket])
 		elif socket in literals:
 			inputs[socket] = literals[socket]
 	merged = merge_graphs(graphs)
 	merged['nodes'][node_id] = {'type': spec['type'], 'inputs': inputs}
+	if node_uniforms:
+		merged['nodes'][node_id]['uniforms'] = node_uniforms
 	if spec.get('samplers'):
 		merged['nodes'][node_id]['samplers'] = {
 			name: path for name, path in (samplers or {}).items() if name in spec['samplers'] and path}
@@ -128,17 +138,21 @@ def read_top_path(comp, name):
 def build_node(scriptOp, spec, out_socket=None):
 	"""Standard onCook body for a node's Script DAT."""
 	comp = scriptOp.parent()
-	upstream, literals = {}, {}
+	upstream, literals, uniforms = {}, {}, {}
+	# read the toggle, never a uniform parameter's value: animating it must not recook the graph
+	as_uniform = bool(spec.get('uniforms')) and comp.par['Asuniform'] is not None and comp.par.Asuniform.eval()
 	for socket, type_ in spec['inputs'].items():
 		d = comp.op('in_' + socket)
 		upstream[socket] = parse_graph(d.text) if d is not None and d.text.strip() else None
-		if type_ != 'closure':
+		if as_uniform and socket in spec['uniforms']:
+			uniforms[socket] = [comp.path, par_name(socket)]
+		elif type_ != 'closure':
 			v = read_literal(comp, socket, type_)
 			if v is not None:
 				literals[socket] = v
 	samplers = {name: read_top_path(comp, name) for name in spec.get('samplers', {})}
 	try:
-		g = make_node(spec, 'n%d' % comp.id, literals, upstream, out_socket, samplers)
+		g = make_node(spec, 'n%d' % comp.id, literals, upstream, out_socket, samplers, uniforms)
 	except (MatxError, ValueError) as e:
 		g = empty_graph()
 		g['error'] = '%s: %s' % (comp.path, e)

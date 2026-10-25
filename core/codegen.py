@@ -13,6 +13,7 @@ Snippet files (glsl/nodes/*.glsl) start with a header of `// @key value` lines:
     // @attr  uv                 (vertex attribute the snippet reads, see ATTRIBUTES)
     // @requires hash            (helper file glsl/lib/hash.glsl, included once)
     // @sampler sampler2D image  (a texture per node instance, see SAMPLER_TYPES)
+    // @uniform value            (an @in the node may bind to a uniform instead of a literal)
 
 The graph's `output` ([node_id, socket]) is the surface the shader renders. A closure output
 supplies radiance and alpha; any other value is shaded as emission, converted to vec4 like any
@@ -24,6 +25,13 @@ in the order the @sampler, @in, then @out lines appear.
 A node with samplers carries `"samplers": {name: TOP path}` in the graph. Each one becomes a
 `uniform sampler2D sMatx_<node>_<name>` in the pixel shader, and generate() returns the
 (uniform, TOP path) pairs for the host to bind on the GLSL MAT's Samplers page.
+
+A node can carry `"uniforms": {input: [op path, par name]}` for inputs its snippet declares with
+@uniform. Each one becomes a `uniform <type> uMatx_<node>_<input>` in the pixel shader instead of
+a literal, and generate() returns [uniform, op path, par name, page] rows for the host to bind
+on the GLSL MAT, so the value can change without recompiling the shader. A colour input (see
+is_color) goes on the MAT's Colors page, which feeds a vec4 uniform (a vec3 input reads its .rgb);
+any other input goes on the Vectors page.
 """
 import re
 
@@ -33,6 +41,8 @@ GLSL_TYPE = {'float': 'float', 'vec2': 'vec2', 'vec3': 'vec3', 'vec4': 'vec4',
              CLOSURE: 'MatxClosure'}
 COMPONENTS = {'float': 1, 'vec2': 2, 'vec3': 3, 'vec4': 4}
 SAMPLER_TYPES = ('sampler2D',)
+# a vec3/vec4 socket whose name contains one of these is a vector, otherwise a colour
+SPATIAL_WORDS = ('vector', 'normal', 'pos', 'uv', 'coord', 'offset', 'dir', 'tangent', 'scale')
 
 
 class MatxError(Exception):
@@ -86,7 +96,8 @@ def _parse_default(type_, text):
 def parse_snippet(text):
 	"""Returns dict(type, samplers=[(type,name)], ins=[(type,name,default)], outs=[(type,name)],
 	attrs, requires, body). A default is a float, a list of floats, an attribute name or None."""
-	snip = {'type': None, 'samplers': [], 'ins': [], 'outs': [], 'attrs': [], 'requires': []}
+	snip = {'type': None, 'samplers': [], 'ins': [], 'outs': [], 'attrs': [], 'requires': [],
+	        'uniforms': []}
 	body = []
 	for line in text.splitlines():
 		m = re.match(r'\s*//\s*@(\w+)\s*(.*?)\s*$', line)
@@ -114,6 +125,8 @@ def parse_snippet(text):
 				snip['attrs'].append(a)
 		elif key == 'requires':
 			snip['requires'].extend(rest.split())
+		elif key == 'uniform':
+			snip['uniforms'].extend(rest.split())
 		elif key == 'sampler':
 			m2 = re.match(r'(\w+)\s+(\w+)$', rest)
 			if not m2 or m2.group(1) not in SAMPLER_TYPES:
@@ -123,6 +136,10 @@ def parse_snippet(text):
 			raise MatxError('unknown snippet key @%s' % key)
 	if not snip['type']:
 		raise MatxError('snippet has no @type')
+	ins = {name: (t, d) for (t, name, d) in snip['ins']}
+	for name in snip['uniforms']:
+		if name not in ins or ins[name][0] == CLOSURE or isinstance(ins[name][1], str):
+			raise MatxError('@uniform %s must name a non-closure @in without an attribute default' % name)
 	snip['body'] = '\n'.join(body).strip() + '\n'
 	if not re.search(r'\bvoid\s+matx_%s\s*\(' % snip['type'], snip['body']):
 		raise MatxError('snippet %s must define void matx_%s(...)' % (snip['type'], snip['type']))
@@ -191,6 +208,11 @@ def convert(expr, src, dst):
 	return table[(src, dst)] % expr
 
 
+def is_color(type_, name):
+	"""vec3/vec4 sockets are colours unless the name looks spatial (vector, normal, uv, ...)."""
+	return type_ in ('vec3', 'vec4') and not any(w in name.lower() for w in SPATIAL_WORDS)
+
+
 def _ident(node_id):
 	return re.sub(r'\W', '_', str(node_id))
 
@@ -253,7 +275,8 @@ def _collect_lib(names, lib, seen, out):
 
 def generate(graph, snippets, lib=None):
 	"""Shades graph['output'] (see surface_color). Returns dict(vertex=str, pixel=str,
-	attributes=[...], order=[...], samplers=[[uniform, TOP path], ...])."""
+	attributes=[...], order=[...], samplers=[[uniform, TOP path], ...],
+	uniforms=[[uniform, op path, par name, 'color' | 'vector'], ...])."""
 	lib = lib or {}
 	if graph.get('error'):
 		raise MatxError('upstream node failed: ' + graph['error'])
@@ -273,6 +296,7 @@ def generate(graph, snippets, lib=None):
 	body = []
 	out_types = {}   # var name -> glsl abstract type
 	samplers = []    # (glsl type, uniform name, TOP path)
+	uniforms = []    # (glsl type, uniform name, op path, par name, MAT page)
 
 	for nid in order:
 		node = nodes[nid]
@@ -297,6 +321,18 @@ def generate(graph, snippets, lib=None):
 			args.append(uniform)
 		for (ty, name, default) in sn['ins']:
 			v = node.get('inputs', {}).get(name, default)
+			ref = node.get('uniforms', {}).get(name)
+			if ref is not None and not is_link(v):
+				if name not in sn['uniforms']:
+					raise MatxError('node %s (%s): input %r cannot be a uniform' % (nid, t, name))
+				uniform = 'uMatx_' + _var(nid, name)
+				if is_color(ty, name):   # the Colors page always feeds a vec4
+					uniforms.append(('vec4', uniform, ref[0], ref[1], 'color'))
+					args.append(uniform + '.rgb' if ty == 'vec3' else uniform)
+				else:
+					uniforms.append((GLSL_TYPE[ty], uniform, ref[0], ref[1], 'vector'))
+					args.append(uniform)
+				continue
 			if v is None:
 				raise MatxError('node %s (%s): input %r has no value' % (nid, t, name))
 			if isinstance(v, str):
@@ -325,9 +361,11 @@ def generate(graph, snippets, lib=None):
 	key = _var(root, socket)
 	if key not in out_types:
 		raise MatxError('node %s (%s) has no output %r' % (root, nodes[root]['type'], socket))
-	pixel = _pixel(snippets, body, attrs, libs, used_types, surface_color(key, out_types[key]), samplers)
+	decls = [(ty, u) for (ty, u, _) in samplers] + [(ty, u) for (ty, u, _, _, _) in uniforms]
+	pixel = _pixel(snippets, body, attrs, libs, used_types, surface_color(key, out_types[key]), decls)
 	return {'vertex': _vertex(attrs), 'pixel': pixel, 'attributes': attrs, 'order': order,
-	        'samplers': [[u, path] for (_, u, path) in samplers]}
+	        'samplers': [[u, path] for (_, u, path) in samplers],
+	        'uniforms': [[u, path, par, page] for (_, u, path, par, page) in uniforms]}
 
 
 def _ordered(attrs):
@@ -414,13 +452,13 @@ def surface_color(var, type_):
 	return convert(var, type_, 'vec4')
 
 
-def _pixel(snippets, body, attrs, libs, used_types, surface, samplers):
+def _pixel(snippets, body, attrs, libs, used_types, surface, decls):
 	lines = ['// generated by tdx-matx -- do not edit', '#include <TDColorSpace>', '',
 	         _block('in Vertex', 'iVert', attrs),
 	         '// Output variable for the color',
 	         'layout(location = 0) out vec4 oFragColor[TD_NUM_COLOR_BUFFERS];', '']
-	if samplers:
-		lines += ['uniform %s %s;' % (ty, u) for (ty, u, _) in samplers] + ['']
+	if decls:
+		lines += ['uniform %s %s;' % (ty, u) for (ty, u) in decls] + ['']
 	lines += [PIXEL_PREAMBLE]
 	lines += libs
 	lines += [snippets[t]['body'] for t in used_types]

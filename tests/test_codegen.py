@@ -136,6 +136,38 @@ class Codegen(unittest.TestCase):
 		self.assertEqual(r['samplers'], [])
 		self.assertNotIn('uniform sampler2D', r['pixel'])
 
+	def _uniform_graph(self):
+		g = example()
+		g['nodes']['n_a']['inputs'] = {}
+		g['nodes']['n_a']['uniforms'] = {'color': ['/demo/RGB1', 'Color']}
+		g['nodes']['n_val'] = {'type': 'Value', 'inputs': {}, 'uniforms': {'value': ['/demo/Value1', 'Value']}}
+		g['nodes']['n_bsdf']['inputs']['roughness'] = ['n_val', 'value_out']
+		return g
+
+	def test_uniform_inputs(self):
+		r = codegen.generate(self._uniform_graph(), SNIPS, LIB)
+		p = r['pixel']
+		self.assertIn('uniform vec4 uMatx_n_a_color;', p)   # the Colors page feeds a vec4
+		self.assertIn('uniform float uMatx_n_val_value;', p)
+		self.assertIn('matx_RGB(uMatx_n_a_color.rgb, n_a_color_out);', p)
+		self.assertIn('matx_Value(uMatx_n_val_value, n_val_value_out);', p)
+		self.assertNotIn('0.05', p)   # n_a's old literal is gone
+		self.assertEqual(sorted(r['uniforms']), [['uMatx_n_a_color', '/demo/RGB1', 'Color', 'color'],
+		                                         ['uMatx_n_val_value', '/demo/Value1', 'Value', 'vector']])
+		self.assertTrue(codegen.is_color('vec3', 'base_color'))
+		self.assertFalse(codegen.is_color('vec3', 'vector'))
+		self.assertFalse(codegen.is_color('float', 'value'))
+		self.assertEqual(codegen.generate(example(), SNIPS, LIB)['uniforms'], [])
+
+	def test_uniform_only_where_declared(self):
+		g = self._uniform_graph()
+		g['nodes']['n_mix']['uniforms'] = {'fac': ['/demo/Mix', 'Fac']}
+		g['nodes']['n_mix']['inputs'].pop('fac')
+		with self.assertRaisesRegex(codegen.MatxError, 'cannot be a uniform'):
+			codegen.generate(g, SNIPS, LIB)
+		with self.assertRaisesRegex(codegen.MatxError, '@uniform'):
+			codegen.parse_snippet('// @type X\n// @in closure s\n// @uniform s\nvoid matx_X() {}')
+
 	def test_bad_snippet_headers(self):
 		with self.assertRaisesRegex(codegen.MatxError, '@sampler'):
 			codegen.parse_snippet('// @type X\n// @sampler samplerCube s\nvoid matx_X() {}')
@@ -180,6 +212,17 @@ class Graph(unittest.TestCase):
 		self.assertEqual(g['nodes']['n1']['samplers'], {})
 		g = matx.make_node(self.SPEC, 'n2', {}, {})
 		self.assertNotIn('samplers', g['nodes']['n2'])
+
+	def test_uniform_replaces_literal_not_link(self):
+		spec = matx.spec_from_snippet(SNIPS['Value'])
+		self.assertEqual(spec['uniforms'], ['value'])
+		g = matx.make_node(spec, 'n1', {'value': 0.3}, {}, uniforms={'value': ['/a/Value1', 'Value']})
+		self.assertEqual(g['nodes']['n1'], {'type': 'Value', 'inputs': {},
+		                                    'uniforms': {'value': ['/a/Value1', 'Value']}})
+		up = matx.make_node(spec, 'n0', {'value': 1.0}, {})
+		g = matx.make_node(spec, 'n1', {}, {'value': up}, uniforms={'value': ['/a/Value1', 'Value']})
+		self.assertEqual(g['nodes']['n1']['inputs'], {'value': ['n0', 'value_out']})
+		self.assertNotIn('uniforms', g['nodes']['n1'])
 
 	def test_error_propagates_and_roundtrip(self):
 		bad = {'version': 1, 'nodes': {}, 'output': None, 'error': 'x'}
