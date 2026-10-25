@@ -8,8 +8,8 @@ See `README.md` for the project overview. This document is a living plan; items 
 
 **Working end to end in TouchDesigner 2025.33230** (`matx-testingGround.toe`):
 - `/matx` is the library (op shortcut `Matx`): `core/` (Text DATs synced to `core/*.py`), `snippets/` (synced to `glsl/`), `nodes/` (generated node COMPs + `EvaluateShader`). The **Build** pulse on `/matx` regenerates `snippets/` and `nodes/` from `glsl/nodes/*.glsl` (details in 3b).
-- `/matx_demo` is the test scene: TexCoord1 -> Noise1 -> MixColor1 (A = RGB1, B = Sampler1 reading `ramp1`) -> PrincipledBSDF -> matout1 -> evaluate1 -> `geo1` sphere -> `render1`. RGB2 and EmissionShader sit unwired.
-- Nodes: TexCoord, Value, RGB, NoiseTexture, MixColor, Sampler, PrincipledBSDF, EmissionShader, ShaderToRGB, MaterialOutput, plus EvaluateShader.
+- `/matx_demo` is the test scene: TexCoord1 -> Noise1 -> MixColor1 (A = RGB1, B = Sampler1 reading `ramp1`) -> PrincipledBSDF -> evaluate1 -> `geo1` sphere -> `render1`. RGB2 and EmissionShader sit unwired.
+- Nodes: TexCoord, Value, RGB, NoiseTexture, MixColor, Sampler, PrincipledBSDF, EmissionShader, ShaderToRGB, plus EvaluateShader (which is also the material output).
 - Unit tests: `python -m unittest discover -s tests` (18 tests, pure Python, no TD needed).
 
 **Last session's work:**
@@ -18,7 +18,6 @@ See `README.md` for the project overview. This document is a living plan; items 
 3. The builder finds renamed library nodes by their `Nodetype` (the library's NoiseTexture node is named `Noise`), instead of creating duplicates.
 
 **Loose ends:**
-- `/matx/nodes/RedNode` and `/matx/snippets/RedNode` exist in the `.toe`, but `glsl/nodes/RedNode.glsl` was deleted and never committed. Delete both ops in TD (Build only reports a snippet DAT whose file is gone; it does not remove it).
 - `/matx/nodes` also holds scratch copies (RGB1, RGB2, Noise1, MixColor1, TexCoord1) outside the library annotation; they are not part of the library.
 - EvaluateShader copies made before `b1f7758` lack the `samplers` + `sampler_exec` ops. Upgrade one with `op.Matx.op('core/td_builder').module.ensure_evaluate_contents(op('<path>'), [])` (already done for `/matx_demo/evaluate1`).
 - TD exited right after the last save without a crash dump; cause unknown, nothing lost.
@@ -77,7 +76,7 @@ Each shading node does its own lighting loop (e.g. `TDLightingPBR` / `TDEnvLight
 Input: JSON DAT (`in_graph`). Contents: Script DATs `vertex` and `pixel` (shader text) and `samplers` (sampler uniform name -> TOP path), a `sampler_exec` DAT Execute that applies that table to the MAT, and `glsl_mat` using them.
 
 Algorithm:
-1. Parse JSON, find `output` node (`MaterialOutput`; error if missing).
+1. Parse JSON; `output` (`[node_id, socket]`) is the surface (error if missing). A closure gives radiance + alpha; any other type is shaded as emission, opaque: float `x` -> `vec4(vec3(x), 1.0)`, other types through the link conversion table (vec3 `c` -> `vec4(c, 1.0)`). There is no MaterialOutput node: EvaluateShader's `in_graph` (labelled Surface) is the material output.
 2. DFS from output through links; detect cycles; topologically sort; drop unreachable nodes.
 3. For each node in order, look up its snippet by `type`, collect required helper functions (deduplicated, in dependency order), and emit a call: `<out_type> n_<id>_<socket> = fn_<type>(<args>);`
 4. Collect **requirements** from nodes: vertex attributes/varyings (uv, normal, position, vertex color), textures (sampler slots), uniforms (exposed parameters), and emit matching vertex-shader `out` / pixel-shader `in` declarations.
@@ -99,7 +98,7 @@ Algorithm:
 | Vector | Mapping, Normal Map, Bump, Vector Math, Vector Rotate |
 | Converter | Math, Map Range, Clamp, Separate/Combine XYZ & RGB, Color <-> HSV, Fresnel/Layer Weight |
 | Shader | **Principled BSDF (PBR, v1)**, Diffuse, Glossy, Emission, Transparent, Mix Shader, Add Shader; later Phong, Toon |
-| Output | Material Output (surface, displacement later), **Evaluate Shader** |
+| Output | **Evaluate Shader** (also the material output: surface; displacement later) |
 
 ## 3. Phases
 
@@ -114,7 +113,7 @@ Algorithm:
 - Pure-Python unit tests for merge + codegen (golden GLSL strings), run outside TD.
 
 **Phase 2 — Minimal usable set** (current phase)
-- Nodes done: Texture Coordinate, Value, RGB, Mix Color, Noise, Image Texture (Sampler), Principled BSDF, Material Output. Remaining: Math, Color Ramp, Normal Map.
+- Nodes done: Texture Coordinate, Value, RGB, Mix Color, Noise, Image Texture (Sampler), Principled BSDF, Evaluate Shader as the material output. Remaining: Math, Color Ramp, Normal Map.
 - Evaluate Shader with GLSL MAT auto-setup and sampler binding: done. Compile-error reporting: remaining.
 - Example `.toe` with a textured PBR sphere: done (`/matx_demo`).
 
@@ -131,11 +130,11 @@ Algorithm:
 **Done (written, unit tested outside TD with `python -m unittest discover -s tests`):**
 - `core/matx.py`: graph parse/dump/merge, `make_node`, error propagation, TD adapter `build_node(scriptOp, NODE, out_socket)`.
 - `core/codegen.py`: snippet parser, topo sort + cycle detection, type conversion, literal emission, vertex/pixel generation with only the attributes the graph needs. CLI: `python core/codegen.py graph.json out_base` writes `out_base.vert/.frag`.
-- Snippets in `glsl/nodes/`: TexCoord, Value, RGB, NoiseTexture, MixColor, Sampler, PrincipledBSDF, EmissionShader, ShaderToRGB, MaterialOutput.
+- Snippets in `glsl/nodes/`: TexCoord, Value, RGB, NoiseTexture, MixColor, Sampler, PrincipledBSDF, EmissionShader, ShaderToRGB.
 - `examples/noise_pbr.json` and its generated `.vert` / `.frag`.
 
 **Conventions fixed by the code:**
-- Graph `output` is `[node_id, output_socket]`; for MaterialOutput the socket is `null`. A node with several output sockets gets one Script DAT per output socket (same nodes, different `output`).
+- Graph `output` is `[node_id, output_socket]`; at EvaluateShader it names the surface. `world_pos` and `camera_index` are always emitted (`codegen.SURFACE_ATTRS`, fog needs them). A node with several output sockets gets one Script DAT per output socket (same nodes, different `output`).
 - Colors are `vec3` in v1. Node ids must start with a letter (`n<td id>`).
 - Snippet defaults are `// @in vec3 name = 0.5` (one number splats) and are used when the JSON has no literal. A default can instead name a vertex attribute (`// @in vec3 vector = uv`): the unconnected input reads `iVert.<member>`, the attribute is emitted only then, and the node COMP gets a connector but no parameter for it.
 - Textures: `// @sampler sampler2D image` declares a texture per node instance; the function takes the samplers first (`matx_Sampler(sampler2D image, vec3 vector, out ...)`). The node's graph entry carries `"samplers": {"image": "<TOP path>"}`, codegen declares `uniform sampler2D sMatx_<node>_<name>;` and returns the `[uniform, TOP path]` pairs as `samplers`. A sampler without a TOP is a generation error.
@@ -146,14 +145,14 @@ Algorithm:
 **In TouchDesigner (`matx-testingGround.toe`, verified on 2025.33230):**
 - `/matx` (op shortcut `Matx`) holds the library. `core/` has Text DATs synced to `core/*.py`; `snippets/` has one Text DAT per `glsl/nodes/*.glsl` (named after its `@type`) and per `glsl/lib/*.glsl` (`lib_<name>`), synced to the files; `nodes/` has one generated node COMP per snippet plus `EvaluateShader`.
 - `core/td_builder.py` generates `snippets/` and `nodes/` from the `.glsl` files. Run it with the **Build** pulse on `/matx` (Matx page). It is idempotent: it adds/removes In/Out DATs to match the headers and get-or-creates parameters, never overwriting user values or destroying parameters.
-- A node COMP: read-only `Nodetype` par; one `in_<socket>` In DAT per input (`connectorder` = header order); one `graph_<socket>` Script DAT + `out_<socket>` Out DAT per output (`graph`/`out_graph` for MaterialOutput); one custom parameter per non-closure input (`float` -> Float, `vec2` -> XY, `vec3`/`vec4` -> RGB/RGBA, or XYZ/XYZW when the socket name looks spatial: vector, normal, uv, ...). All Script DATs share `core/td_node_callbacks.py`, which reads the snippet header at cook time, so editing a header re-cooks its nodes.
+- A node COMP: read-only `Nodetype` par; one `in_<socket>` In DAT per input (`connectorder` = header order); one `graph_<socket>` Script DAT + `out_<socket>` Out DAT per output (`graph`/`out_graph` for a node without outputs); one custom parameter per non-closure input (`float` -> Float, `vec2` -> XY, `vec3`/`vec4` -> RGB/RGBA, or XYZ/XYZW when the socket name looks spatial: vector, normal, uv, ...). All Script DATs share `core/td_node_callbacks.py`, which reads the snippet header at cook time, so editing a header re-cooks its nodes.
 - `EvaluateShader`: `in_graph` -> `vertex`/`pixel` Script DATs (`core/td_eval_callbacks.py`, snippets read from `/matx/snippets`) -> `glsl_mat`. Unconnected it only warns. A third Script DAT, `samplers`, outputs the (name, top) table; the `sampler_exec` DAT Execute calls `apply_samplers()` on every table change, which sizes `glsl_mat`'s Samplers sequence to it (TD keeps at least one block, left blank) and writes each TOP as a path relative to the MAT. The DAT Execute keeps the table cooking with nothing viewing it. A declared but unbound sampler only warns ("Uniform ... is unassigned") and samples a default texture; it does not crash. Existing EvaluateShader copies are upgraded with `td_builder.ensure_evaluate_contents(comp, report)`.
 - `Sampler` node (`glsl/nodes/Sampler.glsl`): `Image` TOP parameter, `vector` input defaulting to the mesh UV, `color` (vec3) and `alpha` outputs. A node's TOP parameter resolves relative to the node's parent, so a sibling TOP is just its name (`ramp1`). Passing `sampler2D` as a function argument compiles on 2025.33230.
 - The builder finds a library node by name, else by its `Nodetype` (so a renamed library node is updated, not duplicated).
 - `/matx_demo` rebuilds `examples/noise_pbr.json` from copied nodes and renders it on a sphere: both shaders compile and link, the vertex shader is identical to `examples/noise_pbr.vert`, the lighting matches a TD PBR MAT on the same scene, and parameter changes regenerate the shader live.
 - Verified: `TDInstanceTexCoord(TDTexCoord(0u))`, `read_literal` (including RGB tuplets), automatic Script DAT dependencies on In DAT text and custom parameters, In DAT `connectorder`.
 - Script DAT text output: set `textFormat = True` **before** assigning `.text`, otherwise tabs split the text into table cells.
-- **TouchDesigner crashes cooking a rendered GLSL MAT whose shader DATs are empty** (three crash dumps, all in `glsl_mat` cook). EvaluateShader therefore never outputs empty source: on a missing graph or any generation error (e.g. the graph does not end in MaterialOutput) it outputs `codegen.fallback()`, a flat magenta shader, and reports the error on its `vertex`/`pixel` DATs.
+- **TouchDesigner crashes cooking a rendered GLSL MAT whose shader DATs are empty** (three crash dumps, all in `glsl_mat` cook). EvaluateShader therefore never outputs empty source: on a missing graph or any generation error (e.g. a sampler without a TOP) it outputs `codegen.fallback()`, a flat magenta shader, and reports the error on its `vertex`/`pixel` DATs.
 
 **Next:** see section 0, "Suggested next steps".
 

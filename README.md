@@ -5,14 +5,14 @@
 ## Core idea
 
 ```
-[Texture Coord] -> [Noise Texture] -> [Color Ramp] -> [Principled BSDF] -> [Material Output] -> [Evaluate Shader] -> GLSL MAT
-        JSON          JSON +node         JSON +node        JSON +node           JSON +node        JSON -> GLSL
+[Texture Coord] -> [Noise Texture] -> [Color Ramp] -> [Principled BSDF] -> [Evaluate Shader] -> GLSL MAT
+        JSON          JSON +node         JSON +node        JSON +node          JSON -> GLSL
 ```
 
 - Every node COMP contains a **Script DAT** that reads the incoming JSON (via an `In DAT`), appends its own node entry, and writes the result to an `Out DAT`.
 - Nodes are connected by wiring COMPs' DAT connectors; the JSON carries the graph, so the order of cooking is just the order of the network.
 - The JSON is modelled on **ComfyUI's API-format workflow**: a flat dictionary of nodes keyed by id, each node having a `type` and `inputs`. An input is either a literal value or a link `[source_node_id, output_name]`.
-- **Evaluate Shader** walks the graph backwards from the output node, topologically sorts it, and emits GLSL by concatenating per-node-type snippets. It writes the result into Text DATs wired to a GLSL MAT.
+- **Evaluate Shader** is also the material output: its **Surface** input takes a shading node (a closure) or any other value, which is shaded as emission (float `x` -> `vec4(vec3(x), 1.0)`, vec3 `c` -> `vec4(c, 1.0)`). It walks the graph backwards from the node plugged into it, topologically sorts it, and emits GLSL by concatenating per-node-type snippets. It writes the result into Text DATs wired to a GLSL MAT.
 
 ## Scope
 
@@ -56,16 +56,13 @@
         "metallic": 0.0,
         "roughness": 0.4
       }
-    },
-    "n_d4": {
-      "type": "MaterialOutput",
-      "inputs": { "surface": ["n_c3", "bsdf"] }
     }
   },
-  "output": ["n_d4", null]
+  "output": ["n_c3", "bsdf"]
 }
 ```
 
+- `output` is the node output plugged into Evaluate Shader: it is the surface the material renders.
 - Node ids are stable and unique per node COMP (derived from the COMP's TD `id`/path), so merging JSON from several upstream branches never collides.
 - A node with several inputs (e.g. Mix: `fac`, `a`, `b`) has one DAT input per socket; its Script DAT merges the `nodes` dicts of all connected upstream JSONs before adding itself.
 - Unconnected sockets use the literal default from the node's parameters.

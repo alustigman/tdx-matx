@@ -14,6 +14,10 @@ Snippet files (glsl/nodes/*.glsl) start with a header of `// @key value` lines:
     // @requires hash            (helper file glsl/lib/hash.glsl, included once)
     // @sampler sampler2D image  (a texture per node instance, see SAMPLER_TYPES)
 
+The graph's `output` ([node_id, socket]) is the surface the shader renders. A closure output
+supplies radiance and alpha; any other value is shaded as emission, converted to vec4 like any
+link except that a float is opaque grey (float x -> vec4(vec3(x), 1.0), vec3 c -> vec4(c, 1.0)).
+
 The body must define `void matx_<type>(<samplers...>, <ins...>, out <outs...>)` with parameters
 in the order the @sampler, @in, then @out lines appear.
 
@@ -37,8 +41,8 @@ class MatxError(Exception):
 
 # name -> (glsl type, member of the Vertex interface block, vertex shader expression).
 # Snippets read an attribute in the pixel shader as `iVert.<member>`. Members are emitted in
-# this order and only for attributes the graph uses (MaterialOutput always needs world_pos and
-# camera_index for fog). `worldSpacePos` and `normal` are locals of the vertex main().
+# this order and only for attributes the graph uses (SURFACE_ATTRS are always emitted: fog
+# needs them). `worldSpacePos` and `normal` are locals of the vertex main().
 # TDCameraIndex() only exists in the vertex stage, hence camera_index is a flat member.
 ATTRIBUTES = {
 	'color':        ('vec4',     'color',          'TDInstanceColor(TDColor())'),
@@ -47,6 +51,9 @@ ATTRIBUTES = {
 	'uv':           ('vec3',     'uv',             'TDInstanceTexCoord(TDTexCoord(0u))'),
 	'camera_index': ('flat int', 'cameraIndex',    'TDCameraIndex()'),
 }
+
+# The shader output (fog) reads these whatever the graph contains.
+SURFACE_ATTRS = ('world_pos', 'camera_index')
 
 PIXEL_PREAMBLE = '''\
 struct MatxClosure {
@@ -245,7 +252,8 @@ def _collect_lib(names, lib, seen, out):
 # --------------------------------------------------------------------------
 
 def generate(graph, snippets, lib=None):
-	"""Returns dict(vertex=str, pixel=str, attributes=[...])."""
+	"""Shades graph['output'] (see surface_color). Returns dict(vertex=str, pixel=str,
+	attributes=[...], order=[...], samplers=[[uniform, TOP path], ...])."""
 	lib = lib or {}
 	if graph.get('error'):
 		raise MatxError('upstream node failed: ' + graph['error'])
@@ -253,13 +261,13 @@ def generate(graph, snippets, lib=None):
 	out = graph.get('output')
 	if not out or out[0] not in nodes:
 		raise MatxError('graph has no output node')
-	root = out[0]
-	if nodes[root]['type'] != 'MaterialOutput':
-		raise MatxError('graph must end in a MaterialOutput node (got %s)' % nodes[root]['type'])
+	root, socket = out
+	if socket is None:
+		raise MatxError('output node %s (%s) has no output socket' % (root, nodes[root]['type']))
 
 	order = sort_graph(graph, root)
 	used_types = []
-	attrs = []
+	attrs = list(SURFACE_ATTRS)
 	libs = []
 	seen_lib = set()
 	body = []
@@ -314,7 +322,10 @@ def generate(graph, snippets, lib=None):
 			outs.append(var)
 		body.append('\tmatx_%s(%s);' % (t, ', '.join(args + outs)))
 
-	pixel = _pixel(graph, root, nodes[root], snippets, body, attrs, libs, used_types, out_types, samplers)
+	key = _var(root, socket)
+	if key not in out_types:
+		raise MatxError('node %s (%s) has no output %r' % (root, nodes[root]['type'], socket))
+	pixel = _pixel(snippets, body, attrs, libs, used_types, surface_color(key, out_types[key]), samplers)
 	return {'vertex': _vertex(attrs), 'pixel': pixel, 'attributes': attrs, 'order': order,
 	        'samplers': [[u, path] for (_, u, path) in samplers]}
 
@@ -350,7 +361,7 @@ PIXEL_HEAD = '''\
 '''
 
 PIXEL_TAIL = '''\
-	vec4 finalColor = vec4({key}.radiance, {key}.alpha);
+	vec4 finalColor = {surface};
 
 	// Apply fog, this does nothing if fog is disabled
 	finalColor = TDFog(finalColor, iVert.worldSpacePos.xyz, iVert.cameraIndex);
@@ -393,18 +404,17 @@ def _vertex(attrs):
 	        + '\nvoid main()\n{\n' + VERTEX_HEAD + '\n' + assigns + '\n' + VERTEX_TAIL + '}\n')
 
 
-def _pixel(graph, root, root_node, snippets, body, attrs, libs, used_types, out_types, samplers):
-	surf = root_node.get('inputs', {}).get('surface')
-	if not is_link(surf):
-		raise MatxError('MaterialOutput.surface must be connected')
-	key = _var(surf[0], surf[1])
-	if out_types.get(key) != CLOSURE:
-		raise MatxError('MaterialOutput.surface needs a closure, got %s' % out_types.get(key))
+def surface_color(var, type_):
+	"""The vec4 the shader outputs for the surface variable `var`: a closure's radiance and alpha,
+	or any other value as opaque emission (float x -> vec4(vec3(x), 1.0), vec3 c -> vec4(c, 1.0))."""
+	if type_ == CLOSURE:
+		return 'vec4(%s.radiance, %s.alpha)' % (var, var)
+	if type_ == 'float':
+		return 'vec4(vec3(%s), 1.0)' % var
+	return convert(var, type_, 'vec4')
 
-	for need in ('world_pos', 'camera_index'):
-		if need not in attrs:
-			raise MatxError('MaterialOutput snippet must declare @attr %s (fog needs it)' % need)
 
+def _pixel(snippets, body, attrs, libs, used_types, surface, samplers):
 	lines = ['// generated by tdx-matx -- do not edit', '#include <TDColorSpace>', '',
 	         _block('in Vertex', 'iVert', attrs),
 	         '// Output variable for the color',
@@ -413,14 +423,10 @@ def _pixel(graph, root, root_node, snippets, body, attrs, libs, used_types, out_
 		lines += ['uniform %s %s;' % (ty, u) for (ty, u, _) in samplers] + ['']
 	lines += [PIXEL_PREAMBLE]
 	lines += libs
-	for t in used_types:
-		if t == 'MaterialOutput':
-			continue
-		lines.append(snippets[t]['body'])
+	lines += [snippets[t]['body'] for t in used_types]
 	lines += ['void main()', '{', PIXEL_HEAD]
-	# MaterialOutput's own call is a no-op marker; emit everything but it
-	lines += [l for l in body if 'matx_MaterialOutput' not in l]
-	lines += ['', PIXEL_TAIL.format(key=key) + '}']
+	lines += body
+	lines += ['', PIXEL_TAIL.format(surface=surface) + '}']
 	return '\n'.join(lines) + '\n'
 
 

@@ -39,7 +39,8 @@ class Codegen(unittest.TestCase):
 		o = r['order']
 		self.assertLess(o.index('n_uv'), o.index('n_noise'))
 		self.assertLess(o.index('n_mix'), o.index('n_bsdf'))
-		self.assertEqual(o[-1], 'n_out')
+		self.assertEqual(o[-1], 'n_bsdf')
+		self.assertIn('vec4 finalColor = vec4(n_bsdf_bsdf.radiance, n_bsdf_bsdf.alpha);', p)
 
 	def test_unused_attribute_not_emitted(self):
 		g = example()
@@ -63,21 +64,28 @@ class Codegen(unittest.TestCase):
 		with self.assertRaisesRegex(codegen.MatxError, 'cycle'):
 			codegen.generate(g, SNIPS, LIB)
 
-	def test_missing_output_and_wrong_root(self):
+	def test_missing_or_bad_output(self):
 		g = example()
 		g['output'] = None
 		with self.assertRaises(codegen.MatxError):
 			codegen.generate(g, SNIPS, LIB)
-		g = example()
-		g['output'] = ['n_mix', 'result']
-		with self.assertRaisesRegex(codegen.MatxError, 'MaterialOutput'):
+		g['output'] = ['n_bsdf', 'nope']
+		with self.assertRaisesRegex(codegen.MatxError, 'no output'):
 			codegen.generate(g, SNIPS, LIB)
 
-	def test_closure_type_check(self):
-		g = example()
-		g['nodes']['n_out']['inputs']['surface'] = ['n_mix', 'result']
-		with self.assertRaisesRegex(codegen.MatxError, 'closure'):
-			codegen.generate(g, SNIPS, LIB)
+	def test_value_surface_is_emission(self):
+		# a non-closure surface is shaded as emission, converted to vec4 like any link
+		for out, ty, expected in ((['n_mix', 'result'], 'vec3', 'vec4(n_mix_result, 1.0)'),
+		                          (['n_noise', 'fac'], 'float', 'vec4(vec3(n_noise_fac), 1.0)')):
+			g = example()
+			del g['nodes']['n_bsdf']
+			g['output'] = out
+			r = codegen.generate(g, SNIPS, LIB)
+			self.assertIn('vec4 finalColor = %s;' % expected, r['pixel'], ty)
+			self.assertNotIn('matx_PrincipledBSDF', r['pixel'])
+			# fog still gets its attributes without a shading node
+			self.assertIn('oVert.worldSpacePos = ', r['vertex'])
+			self.assertIn('oVert.cameraIndex = ', r['vertex'])
 
 	def test_upstream_error_reported(self):
 		g = example()

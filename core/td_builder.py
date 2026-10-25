@@ -251,7 +251,7 @@ def ensure_evaluate_comp(library: COMP, report: list) -> COMP:
 
 def ensure_evaluate_contents(comp: COMP, report: list) -> COMP:
 	"""Creates or updates the inside of an EvaluateShader COMP (the library one or a copy)."""
-	src = _ensure_io(comp, inDAT, 'in_graph', 0, 'Graph')
+	src = _ensure_io(comp, inDAT, 'in_graph', 0, 'Surface')
 	vertex = _ensure_script(comp, 'vertex', EVAL_CALLBACKS)
 	pixel = _ensure_script(comp, 'pixel', EVAL_CALLBACKS)
 	samplers = _ensure_script(comp, 'samplers', EVAL_CALLBACKS)

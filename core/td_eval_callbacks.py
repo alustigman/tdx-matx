@@ -1,12 +1,12 @@
 """
 Script DAT callbacks for the EvaluateShader COMP: the DAT named `vertex` or `pixel` outputs that
-stage of codegen.generate() for the graph arriving in the COMP's `in_graph` In DAT, and the DAT
+stage of codegen.generate() for the graph arriving in the COMP's `in_graph` In DAT (the Surface
+input: a shading node, or any value, shaded as emission), and the DAT
 named `samplers` outputs a (name, top) table of the sampler uniforms the pixel shader declares.
 The COMP's `sampler_exec` DAT Execute calls apply_samplers() when that table changes, which binds
 them on glsl_mat's Samplers page.
 
-When the graph is missing or cannot be generated (for example it does not end in a
-MaterialOutput node) the shader DATs output codegen.fallback() instead and report why. The GLSL
+When the graph is missing or cannot be generated (for example a sampler has no TOP) the shader DATs output codegen.fallback() instead and report why. The GLSL
 MAT must never receive empty source: TouchDesigner crashes cooking a rendered GLSL MAT whose
 shader DATs are empty.
 """
@@ -33,7 +33,7 @@ def onCook(scriptOp: scriptDAT) -> None:
 	result, problem = None, None
 	src = scriptOp.parent().op('in_graph')
 	if src is None or not src.text.strip():
-		problem = 'Connect a MaterialOutput node to the Graph input'
+		problem = 'Connect a shader or any node output to the Surface input'
 	else:
 		try:
 			graph = matx.parse_graph(src.text)
