@@ -6,6 +6,7 @@ Pure Python (no TouchDesigner imports) so it can be unit tested outside TD.
 Snippet files (glsl/nodes/*.glsl) start with a header of `// @key value` lines:
 
     // @type  NoiseTexture
+    // @category Texture         (the node's group in the MATX family's OP Create menu)
     // @in    vec3 vector = 0.0
     // @in    float scale = 5.0
     // @in    vec3 coord = uv    (a default naming an ATTRIBUTE reads it when unconnected)
@@ -101,9 +102,9 @@ def _parse_default(type_, text):
 
 def parse_snippet(text):
 	"""Returns dict(type, samplers=[(type,name)], menus=[(name,[items])], ins=[(type,name,default)],
-	outs=[(type,name)], attrs, requires, uniforms, body). A default is a float, a list of floats, an attribute name or None."""
+	outs=[(type,name)], attrs, requires, uniforms, category, body). A default is a float, a list of floats, an attribute name or None."""
 	snip = {'type': None, 'samplers': [], 'ins': [], 'outs': [], 'attrs': [], 'requires': [],
-	        'uniforms': [], 'menus': []}
+	        'uniforms': [], 'menus': [], 'category': None}
 	body = []
 	for line in text.splitlines():
 		m = re.match(r'\s*//\s*@(\w+)\s*(.*?)\s*$', line)
@@ -113,6 +114,8 @@ def parse_snippet(text):
 		key, rest = m.groups()
 		if key == 'type':
 			snip['type'] = rest
+		elif key == 'category':
+			snip['category'] = rest or None
 		elif key == 'in':
 			m2 = re.match(r'(\w+)\s+(\w+)(?:\s*=\s*(.+))?$', rest)
 			if not m2 or m2.group(1) not in TYPES:

@@ -1,4 +1,5 @@
 // @type Value
+// @category Input
 // @in float value = 0.5
 // @uniform value
 // @out float value_out

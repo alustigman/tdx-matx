@@ -14,6 +14,23 @@
 - The JSON is modelled on **ComfyUI's API-format workflow**: a flat dictionary of nodes keyed by id, each node having a `type` and `inputs`. An input is either a literal value or a link `[source_node_id, output_name]`.
 - **Evaluate Shader** is also the material output: its **Surface** input takes a shading node (a closure) or any other value, which is shaded as emission (float `x` -> `vec4(vec3(x), 1.0)`, vec3 `c` -> `vec4(c, 1.0)`). It walks the graph backwards from the node plugged into it, topologically sorts it, and emits GLSL by concatenating per-node-type snippets. It writes the result into Text DATs wired to a GLSL MAT.
 
+## Works with TDFam
+
+tdx-matx works with [TDFam](https://github.com/dotsimulate/TDFam), the open-source operator-family framework by Lyell Hintz / dotsimulate and Dan Molnar / function.str. The node library is published as the **MATX** operator family, so every node appears under its own MATX tab in TouchDesigner's OP Create dialog (the TAB menu), grouped like Blender's Add menu:
+
+| Group | Nodes |
+|---|---|
+| Input | Tex Coord, Value, RGB |
+| Texture | Noise Texture, Sampler |
+| Color | Mix Color |
+| Converter | Math, Shader To RGB |
+| Shader | Principled BSDF, Emission Shader |
+| Output | Evaluate Shader |
+
+- Press **Build** on `/matx` (Matx page): besides regenerating the nodes, it loads the TDFam component into `/matx/fam` from `third_party/TDFam/TDFam_create.tox` if it is missing, points it at `/matx/nodes`, and writes each node's menu label and group into its TDFam manifest. A new snippet joins the menu on the next Build; its group comes from the snippet's `// @category` header line.
+- Placing a node from the TAB menu copies the library node with the family colour (set it on `/matx/fam`, Family page). Placing from Python: `op.Matx.op('fam').PlaceOp(target_comp, 'Noise')`.
+- TDFam is vendored under the Apache License 2.0; its `LICENSE` and `NOTICE` are kept in `third_party/TDFam/`.
+
 ## Scope
 
 - Target: **GLSL MAT only** (vertex + pixel shader), TouchDesigner's GLSL 3.30+ dialect, using the built-in TD functions (`TDLightingPBR`, `TDEnvLightingPBR`, `TDPerlinNoise`, `TDSimplexNoise`, `TDRGBToHSV`, `TDOutputSwizzle`, ...). Reference: <https://docs.derivative.ca/Write_a_GLSL_Material>
@@ -73,7 +90,7 @@
 tdx-matx/
   README.md                  this file
   IMPLEMENTATION_PLAN.md     phased plan and open questions
-  scriptDat_callbacks_template.py   TD Script DAT callbacks template
+  third_party/TDFam/         vendored TDFam (TDFam_create.tox + LICENSE + NOTICE), see "Works with TDFam"
   tdx-matx.toe               the project file; all node COMPs live inside it for now (exportable to .tox later)
   nodes/                     (later) exported .tox per node, grouped by category
   glsl/                      shared GLSL helper library and per-node snippets

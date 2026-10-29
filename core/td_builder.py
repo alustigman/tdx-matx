@@ -18,6 +18,7 @@ Re-running is safe: existing COMPs and the values of their parameters are kept; 
 parameters are added to match the snippet headers. Sockets that disappeared from a header lose
 their DATs, but their parameters are only reported, never destroyed.
 """
+import json
 import math
 import os
 import re
@@ -297,7 +298,7 @@ def set_preview(comp: COMP, report: Optional[list] = None) -> None:
 	if preview is None:
 		preview = comp.create(baseCOMP, 'preview')
 		report.append('created %s' % preview.path)
-	ensure_evaluate_contents(preview, report)
+	ensure_evaluate_contents(preview, report, material_out=False)
 	geo = _ensure_preview_scene(preview)
 	out = comp.op('out_' + _first_output(comp))
 	src = out.inputs[0] if out is not None and out.inputs else None   # that output's graph Script DAT
@@ -359,8 +360,11 @@ def ensure_evaluate_comp(library: COMP, report: list) -> COMP:
 	return ensure_evaluate_contents(comp, report)
 
 
-def ensure_evaluate_contents(comp: COMP, report: list) -> COMP:
-	"""Creates or updates the inside of an EvaluateShader COMP (the library one or a copy)."""
+def ensure_evaluate_contents(comp: COMP, report: list, material_out: bool = True) -> COMP:
+	"""Creates or updates the inside of an EvaluateShader COMP (the library one or a copy).
+
+	material_out adds an Out MAT `out1` fed by glsl_mat, so the generated material leaves the
+	COMP on a connector (wire it to a Null MAT and point Geometry COMPs at that)."""
 	src = _ensure_io(comp, inDAT, 'in_graph', 0, 'Surface')
 	vertex = _ensure_script(comp, 'vertex', EVAL_CALLBACKS)
 	pixel = _ensure_script(comp, 'pixel', EVAL_CALLBACKS)
@@ -388,7 +392,12 @@ def ensure_evaluate_contents(comp: COMP, report: list) -> COMP:
 	callbacks = op.Matx.op('core/td_eval_callbacks').module
 	callbacks.apply_samplers(samplers, mat)
 	callbacks.apply_uniforms(uniforms, mat)
-	_place_columns([[src], [vertex, pixel, samplers, uniforms], execs, [mat]])
+	out = None
+	if material_out:
+		out = _ensure_io(comp, outMAT, 'out1', 0, 'Material')
+		if not out.inputs or out.inputs[0] != mat:
+			mat.outputConnectors[0].connect(out.inputConnectors[0])
+	_place_columns([[src], [vertex, pixel, samplers, uniforms], execs, [mat]] + ([[out]] if out else []))
 	for d in mat.docked:
 		d.nodeX = mat.nodeX + (mat.nodeWidth - d.nodeWidth) / 2
 		d.nodeY = mat.nodeY - d.nodeHeight - 30
@@ -431,10 +440,63 @@ def build_all(matx_comp: COMP) -> list:
 	snippets = matx_comp.op('snippets') or matx_comp.create(baseCOMP, 'snippets')
 	library = matx_comp.op('nodes') or matx_comp.create(baseCOMP, 'nodes')
 	codegen = matx_comp.op('core/codegen').module
-	comps = []
+	comps, menu_info = [], {}
 	for d in ensure_snippets(snippets, report):
-		comps.append(ensure_node_comp(library, codegen.parse_snippet(d.text), report))
-	comps.append(ensure_evaluate_comp(library, report))
+		snip = codegen.parse_snippet(d.text)
+		comp = ensure_node_comp(library, snip, report)
+		comps.append(comp)
+		menu_info[comp.name] = (_label(snip['type']), snip['category'])
+	comp = ensure_evaluate_comp(library, report)
+	comps.append(comp)
+	menu_info[comp.name] = (_label(comp.name), 'Output')
 	_place_grid(comps, COLUMNS)
-	_place_columns([[matx_comp.op('build_exec')], [matx_comp.op('core')], [snippets], [library]])
+	fam = ensure_fam(matx_comp, library, menu_info, report)
+	_place_columns([[matx_comp.op('build_exec')], [matx_comp.op('core')], [snippets], [library],
+	                [o for o in (fam, matx_comp.op('scratch')) if o is not None]])
 	return report
+
+
+# --------------------------------------------------------------------------
+# TDFam: the library as the MATX operator family in the OP Create (TAB) menu
+# --------------------------------------------------------------------------
+
+FAM_TOX = 'third_party/TDFam/TDFam_create.tox'
+FAM_NAME = 'MATX'
+
+
+def ensure_fam(matx_comp: COMP, library: COMP, menu_info: dict, report: list) -> Optional[COMP]:
+	"""Creates or updates matx_comp's `fam` TDFam component, which publishes every COMP in library.
+
+	The component is loaded from FAM_TOX (vendored TDFam) when missing, named FAM_NAME and pointed
+	at library. Its manifests are then deployed, each node's OpInfo gets the label and group in
+	menu_info ({comp name: (label, group)}), and they are deployed again so the menu shows them.
+	"""
+	fam = matx_comp.op('fam')
+	if fam is None:
+		path = os.path.join(project.folder, FAM_TOX)
+		if not os.path.isfile(path):
+			report.append('no %s: the MATX family was not created' % FAM_TOX)
+			return None
+		fam = matx_comp.loadTox(path)
+		fam.name = 'fam'
+		fam.par.Family = FAM_NAME
+		report.append('created %s from %s' % (fam.path, FAM_TOX))
+	if fam.par.Opcomp.eval() != library:
+		fam.par.Opcomp = matx_comp.relativePath(library)
+	deploy = fam.ext.OpFamExt.onParEnsuremanifests   # the Ensure Manifests pulse's handler, run now
+	deploy()
+	for name, (label, group) in menu_info.items():
+		dat = library.op(name + '/FamManifest/OpInfo')
+		if dat is None:
+			report.append('%s has no TDFam manifest' % name)
+			continue
+		info = json.loads(dat.text or '{}')
+		wanted = dict(info, op_label=label, **({'op_group': group} if group else {}))
+		if wanted != info:
+			dat.text = json.dumps(wanted, indent=4)
+		manifest = dat.parent()   # TDFam drops it at a fixed spot: move it under the node's ops
+		others = [c for c in library.op(name).children if c != manifest]
+		manifest.nodeX = 0
+		manifest.nodeY = min(c.nodeY for c in others) - _snap(manifest.nodeHeight + 60) if others else 0
+	deploy()
+	return fam

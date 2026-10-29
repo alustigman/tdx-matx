@@ -1,4 +1,5 @@
 // @type NoiseTexture
+// @category Texture
 // @in vec3 vector = 0.0
 // @in float scale = 5.0
 // @out float fac

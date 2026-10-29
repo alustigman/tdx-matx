@@ -1,4 +1,5 @@
 // @type Math
+// @category Converter
 // @menu operation add subtract multiply divide power logarithm sqrt inverse_sqrt absolute exponent minimum maximum less_than greater_than sign round floor ceil truncate fraction modulo snap sine cosine tangent arcsine arccosine arctangent arctan2 radians degrees
 // @in float a = 0.5
 // @in float b = 0.5

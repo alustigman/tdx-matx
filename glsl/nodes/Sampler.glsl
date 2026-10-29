@@ -1,4 +1,5 @@
 // @type Sampler
+// @category Texture
 // @sampler sampler2D image
 // @in vec3 vector = uv
 // @out vec3 color

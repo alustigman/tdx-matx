@@ -1,4 +1,5 @@
 // @type MixColor
+// @category Color
 // @in float fac = 0.5
 // @in vec3 a = 0.5
 // @in vec3 b = 0.5

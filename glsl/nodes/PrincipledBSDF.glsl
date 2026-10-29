@@ -1,4 +1,5 @@
 // @type PrincipledBSDF
+// @category Shader
 // @in vec3 base_color = 0.8
 // @in float metallic = 0.0
 // @in float roughness = 0.5

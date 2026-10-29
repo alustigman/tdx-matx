@@ -1,4 +1,5 @@
 // @type ShaderToRGB
+// @category Converter
 // @in closure surface
 // @out vec3 rgbOut
 void matx_ShaderToRGB(MatxClosure surface, out vec3 rgbOut)

@@ -1,4 +1,5 @@
 // @type RGB
+// @category Input
 // @in vec3 color = 0.5
 // @uniform color
 // @out vec3 color_out
