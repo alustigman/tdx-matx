@@ -28,7 +28,7 @@ tdx-matx works with [TDFam](https://github.com/dotsimulate/TDFam), the open-sour
 | Output | Evaluate Shader |
 
 - Press **Build** on `/matx` (Matx page): besides regenerating the nodes, it loads the TDFam component into `/matx/fam` from `third_party/TDFam/TDFam_create.tox` if it is missing, points it at `/matx/nodes`, and writes each node's menu label and group into its TDFam manifest. A new snippet joins the menu on the next Build; its group comes from the snippet's `// @category` header line. When a library node is not in the family colour (a node Build just created, say), Build turns the family's **Install** toggle off and back on a few frames later, which recolours the library.
-- Placing a node from the TAB menu copies the library node with the family colour (set it on `/matx/fam`, Family page). Placing from Python: `op.Matx.op('fam').PlaceOp(target_comp, 'Noise')`.
+- Placing a node from the TAB menu copies the library node with the family colour (set it on `/matx/fam`, Family page), with its **Preview** on (the family's callbacks DAT, `core/td_fam_callbacks.py`, which Build sets as `/matx/fam`'s Callback DAT). Every node also has an **Edit Shader** pulse that opens its `glsl/nodes/<type>.glsl` in your external editor. Placing from Python: `op.Matx.op('fam').PlaceOp(target_comp, 'Noise')`.
 - TDFam is vendored under the Apache License 2.0; its `LICENSE` and `NOTICE` are kept in `third_party/TDFam/`.
 
 ## Scope
