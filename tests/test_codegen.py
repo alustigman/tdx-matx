@@ -187,6 +187,23 @@ class Codegen(unittest.TestCase):
 			codegen.generate(self._math_graph({'operation': 'bogus'}), SNIPS, LIB)
 		self.assertNotIn('const int', codegen.generate(example(), SNIPS, LIB)['pixel'])
 
+	def test_vector_nodes(self):
+		g = {'version': 1, 'output': ['n_vm', 'vector'], 'nodes': {
+			'n_xyz': {'type': 'XYZ', 'inputs': {}, 'uniforms': {'vector': ['/demo/XYZ1', 'Vector']}},
+			'n_sep': {'type': 'SeparateXYZ', 'inputs': {'vector': ['n_xyz', 'vector_out']}},
+			'n_comb': {'type': 'CombineXYZ', 'inputs': {'x': ['n_sep', 'z'], 'y': ['n_sep', 'y'], 'z': 1.0}},
+			'n_vm': {'type': 'VectorMath', 'menus': {'operation': 'cross_product'},
+			         'inputs': {'vector_a': ['n_xyz', 'vector_out'], 'vector_b': ['n_comb', 'vector']}}}}
+		r = codegen.generate(g, SNIPS, LIB)
+		p = r['pixel']
+		self.assertIn('uniform vec3 uMatx_n_xyz_vector;', p)   # the Vectors page, not the Colors page
+		self.assertEqual(r['uniforms'], [['uMatx_n_xyz_vector', '/demo/XYZ1', 'Vector', 'vector']])
+		self.assertIn('matx_CombineXYZ(n_sep_z, n_sep_y, 1.0, n_comb_vector);', p)
+		self.assertIn('matx_VectorMath(MATX_VECTORMATH_OPERATION_CROSS_PRODUCT, n_xyz_vector_out, '
+		              'n_comb_vector, vec3(0.0, 0.0, 0.0), 1.0, n_vm_vector, n_vm_value);', p)
+		self.assertEqual([n for (_, n, _) in SNIPS['VectorMath']['ins']],
+		                 ['vector_a', 'vector_b', 'vector_c', 'scale'])
+
 	def test_menu_recorded_on_node(self):
 		spec = matx.spec_from_snippet(SNIPS['Math'])
 		self.assertNotIn('operation', spec['inputs'])

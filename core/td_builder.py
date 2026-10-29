@@ -499,4 +499,20 @@ def ensure_fam(matx_comp: COMP, library: COMP, menu_info: dict, report: list) ->
 		manifest.nodeX = 0
 		manifest.nodeY = min(c.nodeY for c in others) - _snap(manifest.nodeHeight + 60) if others else 0
 	deploy()
+	reinstall_fam(fam, library, report)
 	return fam
+
+
+def reinstall_fam(fam: COMP, library: COMP, report: list) -> None:
+	"""Turns fam's Install toggle off, then on, when a library node (a new one, say) is not in the
+	family colour: installing is what gives TDFam's masters their colour. Both flips are deferred
+	a few frames, and a frame apart, so that the manifest deploy has settled and each one reaches
+	TDFam's Parameter Execute callback (flipped during a build, the reinstall left nodes grey)."""
+	color = tuple(round(c, 3) for c in fam.parGroup.Color.eval()[:3])
+	stale = [c.name for c in library.children
+	         if c.isCOMP and tuple(round(x, 3) for x in c.color) != color]
+	if not stale or not fam.par.Install.eval():
+		return
+	run('args[0].par.Install = False', fam, delayFrames=5)
+	run('args[0].par.Install = True', fam, delayFrames=10)
+	report.append('reinstalling %s for the family colour of %s' % (fam.path, ', '.join(stale)))
