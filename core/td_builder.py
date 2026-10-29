@@ -6,7 +6,8 @@ Builds the tdx-matx library inside the `matx` COMP (op shortcut `Matx`) from the
 	           glsl/lib/*.glsl (named lib_<name>), synced to the files
 	nodes/     one node COMP per snippet, plus EvaluateShader
 
-A node COMP gets an In DAT per @in socket and a custom parameter per literal input (none for a
+A node COMP gets an In DAT per @in socket, a Menu parameter per @menu (no socket: a shader
+constant), a custom parameter per literal input (none for a
 closure, nor for an input whose default is a vertex attribute such as `uv`), a TOP parameter per
 @sampler, an `Asuniform` toggle when the snippet declares @uniform inputs, and a Script DAT + Out
 DAT per @out socket. A node with outputs also gets a `Preview` toggle on its first page (Matx) and
@@ -104,7 +105,7 @@ _STYLE_FAMILY = {'RGB': ('RGB', 'RGBA'), 'XY': ('XY', 'XYZW'), 'XYZ': ('XYZ', 'X
 
 
 def _ensure_par(comp: COMP, page, name: str, style: str, report: list, label: str, help_: str,
-                default=None, norm=None, read_only=False) -> list:
+                default=None, norm=None, read_only=False, menu=None) -> list:
 	found = [p for p in comp.customPars if p.tupletName == name]
 	created = not found
 	if created:
@@ -119,6 +120,8 @@ def _ensure_par(comp: COMP, page, name: str, style: str, report: list, label: st
 		p.label = label
 		p.help = help_
 		p.readOnly = read_only
+		if menu is not None:   # (names, labels), set before the default, which must be one of them
+			p.menuNames, p.menuLabels = menu
 		if d is not None:
 			p.default = d
 			if created:
@@ -225,6 +228,12 @@ def ensure_node_contents(comp: COMP, snip: dict, report: list) -> COMP:
 
 	matx = op.Matx.op('core/matx').module
 	inputs_page = _page(comp, 'Inputs')
+	for (name, items) in snip['menus']:
+		label = _label(name)
+		_ensure_par(comp, inputs_page, matx.par_name(name), 'Menu', report, label,
+		            '%s of this node. A constant compiled into the shader (changing it recompiles), '
+		            'not an input socket.' % label,
+		            default=items[0], menu=(items, [_label(i) for i in items]))
 	if snip['uniforms']:
 		_ensure_par(comp, inputs_page, 'Asuniform', 'Toggle', report, 'As Uniform',
 		            'On: %s becomes a uniform on the GLSL MAT, so animating it does not recompile '

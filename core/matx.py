@@ -9,7 +9,8 @@ A node COMP is expected to contain:
   - one Script DAT per output socket, calling build_node(scriptOp, NODE, out_socket)
 and to carry one custom parameter per literal input, named after the socket with
 underscores removed and capitalised (`base_color` -> `Basecolor`; vectors use TD
-tuplets, e.g. Basecolorr/g/b), plus one TOP parameter per sampler, named the same way.
+tuplets, e.g. Basecolorr/g/b), plus one TOP parameter per sampler and one Menu parameter per
+@menu (holding the item name), named the same way.
 A node whose snippet declares @uniform inputs also carries an `Asuniform` toggle: when on, those
 inputs are recorded as uniform references (COMP path, parameter name) instead of their values,
 so animating the parameter does not change the graph or recompile the shader.
@@ -60,18 +61,21 @@ def spec_from_snippet(snip):
 	        'inputs': {name: t for (t, name, _) in snip['ins']},
 	        'outputs': {name: t for (t, name) in snip['outs']},
 	        'samplers': {name: t for (t, name) in snip['samplers']},
+	        'menus': {name: list(items) for (name, items) in snip.get('menus', [])},
 	        'uniforms': list(snip.get('uniforms', []))}
 
 
-def make_node(spec, node_id, literals, upstream, out_socket=None, samplers=None, uniforms=None):
+def make_node(spec, node_id, literals, upstream, out_socket=None, samplers=None, uniforms=None,
+              menus=None):
 	"""
 	spec:      {'type': str, 'inputs': {socket: type}, 'outputs': {socket: type},
-	            'samplers': {name: type} (optional)}
+	            'samplers': {name: type}, 'menus': {name: [items]} (both optional)}
 	literals:  {socket: value} from the COMP's parameters
 	upstream:  {socket: graph} parsed graph of each connected input (absent/empty = unconnected)
 	samplers:  {name: TOP path} for the spec's samplers; unset ones are left out
 	uniforms:  {socket: [op path, par name]} for unconnected inputs bound to a uniform; they
 	           replace the literal (a connected input stays a link)
+	menus:     {name: item} for the spec's menus (not sockets: compile-time constants)
 	Returns the graph including this node, with `output` -> [node_id, out_socket].
 	"""
 	outputs = list(spec.get('outputs', {}))
@@ -102,6 +106,9 @@ def make_node(spec, node_id, literals, upstream, out_socket=None, samplers=None,
 	if spec.get('samplers'):
 		merged['nodes'][node_id]['samplers'] = {
 			name: path for name, path in (samplers or {}).items() if name in spec['samplers'] and path}
+	if spec.get('menus'):
+		merged['nodes'][node_id]['menus'] = {
+			name: item for name, item in (menus or {}).items() if name in spec['menus']}
 	merged['output'] = [node_id, out_socket]
 	if errors:
 		merged['error'] = errors[0]   # first upstream failure wins; Evaluate Shader reports it
@@ -151,8 +158,10 @@ def build_node(scriptOp, spec, out_socket=None):
 			if v is not None:
 				literals[socket] = v
 	samplers = {name: read_top_path(comp, name) for name in spec.get('samplers', {})}
+	menus = {name: str(comp.par[par_name(name)].eval()) for name in spec.get('menus', {})
+	         if comp.par[par_name(name)] is not None}
 	try:
-		g = make_node(spec, 'n%d' % comp.id, literals, upstream, out_socket, samplers, uniforms)
+		g = make_node(spec, 'n%d' % comp.id, literals, upstream, out_socket, samplers, uniforms, menus)
 	except (MatxError, ValueError) as e:
 		g = empty_graph()
 		g['error'] = '%s: %s' % (comp.path, e)

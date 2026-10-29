@@ -168,7 +168,36 @@ class Codegen(unittest.TestCase):
 		with self.assertRaisesRegex(codegen.MatxError, '@uniform'):
 			codegen.parse_snippet('// @type X\n// @in closure s\n// @uniform s\nvoid matx_X() {}')
 
+	def _math_graph(self, menus=None):
+		return {'version': 1, 'output': ['n_m', 'value'], 'nodes': {
+			'n_m': {'type': 'Math', 'inputs': {'a': 0.25, 'b': 2.0}, 'menus': menus or {}}}}
+
+	def test_menu_is_a_constant_argument(self):
+		self.assertEqual(SNIPS['Math']['menus'][0][1][:3], ['add', 'subtract', 'multiply'])
+		self.assertEqual([n for (_, n, _) in SNIPS['Math']['ins']], ['a', 'b'])   # no socket for the menu
+		p = codegen.generate(self._math_graph({'operation': 'power'}), SNIPS, LIB)['pixel']
+		self.assertIn('const int MATX_MATH_OPERATION_ADD = 0;', p)
+		self.assertIn('const int MATX_MATH_OPERATION_POWER = 4;', p)
+		self.assertIn('matx_Math(MATX_MATH_OPERATION_POWER, 0.25, 2.0, n_m_value);', p)
+		self.assertLess(p.index('MATX_MATH_OPERATION_ADD = 0'), p.index('void matx_Math('))
+		p = codegen.generate(self._math_graph(), SNIPS, LIB)['pixel']   # unset: first item
+		self.assertIn('matx_Math(MATX_MATH_OPERATION_ADD, ', p)
+		self.assertEqual(p.count('const int MATX_MATH_OPERATION_ADD'), 1)
+		with self.assertRaisesRegex(codegen.MatxError, 'not a operation option'):
+			codegen.generate(self._math_graph({'operation': 'bogus'}), SNIPS, LIB)
+		self.assertNotIn('const int', codegen.generate(example(), SNIPS, LIB)['pixel'])
+
+	def test_menu_recorded_on_node(self):
+		spec = matx.spec_from_snippet(SNIPS['Math'])
+		self.assertNotIn('operation', spec['inputs'])
+		g = matx.make_node(spec, 'n1', {'a': 1.0}, {}, menus={'operation': 'sine', 'other': 'x'})
+		self.assertEqual(g['nodes']['n1']['menus'], {'operation': 'sine'})
+		self.assertNotIn('menus', matx.make_node(Graph.SPEC, 'n2', {}, {})['nodes']['n2'])
+
 	def test_bad_snippet_headers(self):
+		for bad in ('// @menu op', '// @menu op Add', '// @menu op a a', '// @menu a x y\n// @in float a'):
+			with self.assertRaisesRegex(codegen.MatxError, '@menu'):
+				codegen.parse_snippet('// @type X\n%s\nvoid matx_X() {}' % bad)
 		with self.assertRaisesRegex(codegen.MatxError, '@sampler'):
 			codegen.parse_snippet('// @type X\n// @sampler samplerCube s\nvoid matx_X() {}')
 		with self.assertRaisesRegex(codegen.MatxError, 'neither'):
