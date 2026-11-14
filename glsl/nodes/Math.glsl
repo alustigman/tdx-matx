@@ -5,6 +5,8 @@
 // @in float b = 0.5
 // @in float c = 0.5
 // @out float value
+// @enable b unless operation sqrt inverse_sqrt absolute exponent sign round floor ceil truncate fraction sine cosine tangent arcsine arccosine arctangent radians degrees hyperbolic_sine hyperbolic_cosine hyperbolic_tangent
+// @enable c if operation multiply_add compare smooth_minimum smooth_maximum wrap
 // Blender's Math node: operations that can fail (divide, logarithm, power, sqrt, modulo, snap,
 // wrap, pingpong) return 0.0 instead of NaN or infinity, as Blender's safe_* variants do. `b` is
 // unused by the one-operand operations; `c` is read by multiply_add (a * b + c), compare (1 when

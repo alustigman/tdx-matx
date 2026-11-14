@@ -19,6 +19,7 @@ Snippet files (glsl/nodes/*.glsl) start with a header of `// @key value` lines:
     // @uniform time = absTime.seconds   (an @in that is always a uniform, driven by an expression)
     // @menu  operation add subtract   (a constant chosen from a menu, the first item by default)
     // @attrib vec3 attribute = Tex texcoord   (a geometry attribute chosen by name, see below)
+    // @enable c if operation multiply_add wrap   (when a parameter is in use, see below)
 
 The graph's `output` ([node_id, socket]) is the surface the shader renders. A closure output
 supplies radiance and alpha; any other value is shaded as emission, converted to vec4 like any
@@ -54,6 +55,11 @@ is what makes TDAttrib_<Name>() exist. The declared size must match the geometry
 a `typed` attrib lets the node choose it (float..vec4; the value is converted to the snippet's
 parameter type). A `texcoord` attrib (vec3) is read with TDTexAttrib_<Name>(0u), which is the POP
 attribute for POPs and uv[0] for SOPs; `Tex` read that way is the built-in `uv` attribute.
+
+`// @enable <name>... if|unless <menu> <item>...` tells the node which parameters a menu leaves
+unused, the way Blender hides them: the parameters of the named @in, @menu or @attrib entries are
+greyed out unless (`if`) or while (`unless`) the menu holds one of the items. Several @enable
+lines on one parameter must all hold. It only drives the node's UI; the shader does not change.
 """
 import re
 
@@ -133,10 +139,13 @@ def _parse_default(type_, text):
 def parse_snippet(text):
 	"""Returns dict(type, samplers=[(type,name)], menus=[(name,[items])], ins=[(type,name,default)],
 	outs=[(type,name)], attrs, requires, uniforms, driven={uniform: expression},
-	attribs=[(type,name,default attribute,flavor)], ranges={input: (low, high)}, category, body). A default is a float, a list
-	of floats, an attribute name or None."""
+	attribs=[(type,name,default attribute,flavor)], ranges={input: (low, high)},
+	enables={parameter: [(menu, [items], True for `if` / False for `unless`)]}, category, body).
+	A default is a float, a list of floats, an attribute name or None. @enable only drives the
+	node's UI: the shader is the same whatever is greyed out."""
 	snip = {'type': None, 'samplers': [], 'ins': [], 'outs': [], 'attrs': [], 'requires': [],
-	        'uniforms': [], 'driven': {}, 'menus': [], 'attribs': [], 'ranges': {}, 'category': None}
+	        'uniforms': [], 'driven': {}, 'menus': [], 'attribs': [], 'ranges': {}, 'enables': {},
+	        'category': None}
 	body = []
 	for line in text.splitlines():
 		m = re.match(r'\s*//\s*@(\w+)\s*(.*?)\s*$', line)
@@ -199,6 +208,13 @@ def parse_snippet(text):
 			        or len(set(words[1:])) != len(words) - 1:
 				raise MatxError('bad @menu line (want: name item item..., lower case, unique): %r' % line)
 			snip['menus'].append((words[0], words[1:]))
+		elif key == 'enable':
+			m2 = re.match(r'(\w+(?:\s+\w+)*?)\s+(if|unless)\s+(\w+)((?:\s+\w+)+)$', rest)
+			if not m2:
+				raise MatxError('bad @enable line (want: name... if|unless menu item...): %r' % line)
+			names, word, menu, items = m2.groups()
+			for name in names.split():
+				snip['enables'].setdefault(name, []).append((menu, items.split(), word == 'if'))
 		else:
 			raise MatxError('unknown snippet key @%s' % key)
 	if not snip['type']:
@@ -216,6 +232,18 @@ def parse_snippet(text):
 	for name in snip['uniforms']:
 		if name not in ins or ins[name][0] == CLOSURE or isinstance(ins[name][1], str):
 			raise MatxError('@uniform %s must name a non-closure @in without an attribute default' % name)
+	menus = dict(snip['menus'])
+	with_par = [n for n, (t, d) in ins.items() if t != CLOSURE and not isinstance(d, str)]
+	with_par += list(menus) + [n for (_, n, _, _) in snip['attribs']]
+	for name, conditions in snip['enables'].items():
+		if name not in with_par:
+			raise MatxError('@enable %s must name an @in with a parameter, a @menu or an @attrib' % name)
+		for (menu, items, _) in conditions:
+			if menu not in menus or menu == name:
+				raise MatxError('@enable %s: %r is not another @menu of the snippet' % (name, menu))
+			unknown = [i for i in items if i not in menus[menu]]
+			if unknown:
+				raise MatxError('@enable %s: @menu %s has no item %s' % (name, menu, ', '.join(unknown)))
 	snip['body'] = '\n'.join(body).strip() + '\n'
 	if not re.search(r'\bvoid\s+matx_%s\s*\(' % snip['type'], snip['body']):
 		raise MatxError('snippet %s must define void matx_%s(...)' % (snip['type'], snip['type']))

@@ -256,10 +256,11 @@ def ensure_node_contents(comp: COMP, snip: dict, report: list) -> COMP:
 	inputs_page = _page(comp, 'Inputs')
 	for (name, items) in snip['menus']:
 		label = _label(name)
-		_ensure_par(comp, inputs_page, matx.par_name(name), 'Menu', report, label,
-		            '%s of this node. A constant compiled into the shader (changing it recompiles), '
-		            'not an input socket.' % label,
-		            default=items[0], menu=(items, [_label(i) for i in items]))
+		pars = _ensure_par(comp, inputs_page, matx.par_name(name), 'Menu', report, label,
+		                   '%s of this node. A constant compiled into the shader (changing it recompiles), '
+		                   'not an input socket.%s' % (label, _enable_help(snip, name)),
+		                   default=items[0], menu=(items, [_label(i) for i in items]))
+		_set_enable(pars, _enable_expr(snip, name, matx))
 	choosable = [n for n in snip['uniforms'] if n not in snip['driven']]
 	if choosable:
 		_ensure_par(comp, inputs_page, 'Asuniform', 'Toggle', report, 'As Uniform',
@@ -268,16 +269,18 @@ def ensure_node_contents(comp: COMP, snip: dict, report: list) -> COMP:
 		            % ', '.join(_label(n) for n in choosable), default=False)
 	for (ty, name, default, flavor) in snip['attribs']:
 		label = _label(name)
-		_ensure_par(comp, inputs_page, matx.par_name(name), 'Str', report, label,
-		            'Name of the geometry attribute this node reads (a POP or SOP attribute such as '
-		            'Tex, Color or a custom one). It is declared on the Attributes page of the Evaluate '
-		            "Shader's GLSL MAT.%s" % (' For SOPs this is texture layer 0 (uv).' if flavor == 'texcoord' else ''),
-		            default=default)
+		pars = _ensure_par(comp, inputs_page, matx.par_name(name), 'Str', report, label,
+		                   'Name of the geometry attribute this node reads (a POP or SOP attribute such as '
+		                   'Tex, Color or a custom one). It is declared on the Attributes page of the Evaluate '
+		                   "Shader's GLSL MAT.%s%s" % (' For SOPs this is texture layer 0 (uv).' if flavor == 'texcoord' else '',
+		                                              _enable_help(snip, name)),
+		                   default=default)
 		if flavor == 'typed':
 			types = ['float', 'vec2', 'vec3', 'vec4']
-			_ensure_par(comp, inputs_page, matx.par_name(name) + 'type', 'Menu', report, label + ' Type',
-			            "Size of the attribute. It must match the geometry's attribute, or the values "
-			            'read are wrong.', default=ty, menu=(types, ['Float', 'Vec2', 'Vec3', 'Vec4']))
+			pars = pars + _ensure_par(comp, inputs_page, matx.par_name(name) + 'type', 'Menu', report, label + ' Type',
+			                          "Size of the attribute. It must match the geometry's attribute, or the values "
+			                          'read are wrong.', default=ty, menu=(types, ['Float', 'Vec2', 'Vec3', 'Vec4']))
+		_set_enable(pars, _enable_expr(snip, name, matx))
 	for (ty, name) in snip['samplers']:
 		label = _label(name)
 		_ensure_par(comp, inputs_page, matx.par_name(name), 'TOP', report, label,
@@ -292,14 +295,12 @@ def ensure_node_contents(comp: COMP, snip: dict, report: list) -> COMP:
 		if name in snip['driven']:
 			help_ += (' Always a uniform on the GLSL MAT: the expression (%s by default) animates '
 			          'it without recompiling the shader.' % snip['driven'][name])
+		help_ += _enable_help(snip, name)
 		pars = _ensure_par(comp, inputs_page, matx.par_name(name), _par_style(ty, name), report, label,
 		                   help_, default=default, norm=snip['ranges'].get(name) or _norm_range(default),
 		                   expr=snip['driven'].get(name))
-		# greyed out while a wire feeds the socket (in_<name> is connector i)
-		enable = 'len(me.inputConnectors[%d].connections) == 0' % i
-		for p in pars:
-			if p.enableExpr != enable:
-				p.enableExpr = enable
+		# greyed out while a wire feeds the socket (in_<name> is connector i) or a menu leaves it unused
+		_set_enable(pars, _enable_expr(snip, name, matx, connector=i))
 	_remove_stale(comp, 'in_', {o.name for o in ins}, report)
 
 	sockets = [name for (_, name) in snip['outs']] or [None]
@@ -318,6 +319,36 @@ def ensure_node_contents(comp: COMP, snip: dict, report: list) -> COMP:
 	_place_manifest(comp)
 	set_preview(comp, report)
 	return comp
+
+
+def _enable_expr(snip: dict, name: str, matx, connector: Optional[int] = None) -> str:
+	"""The enableExpr of the parameter(s) of snippet entry `name`: its input is not connected
+	(when it has connector index `connector`) and every @enable condition on it holds. '' when
+	nothing applies, which leaves the parameter always enabled."""
+	terms = []
+	if connector is not None:
+		terms.append('len(me.inputConnectors[%d].connections) == 0' % connector)
+	for (menu, items, positive) in snip['enables'].get(name, ()):
+		terms.append('me.par.%s.eval() %s %r' % (matx.par_name(menu), 'in' if positive else 'not in',
+		                                         tuple(items)))
+	return ' and '.join(terms)
+
+
+def _enable_help(snip: dict, name: str) -> str:
+	"""A help sentence saying when the @enable lines of `name` grey its parameter out."""
+	sentences = []
+	for (menu, items, positive) in snip['enables'].get(name, ()):
+		labels = [_label(i) for i in items]
+		listed = ', '.join(labels[:-1]) + ' or ' + labels[-1] if len(labels) > 1 else labels[0]
+		sentences.append(' Only used when %s is %s.' % (_label(menu), listed) if positive
+		                 else ' Not used when %s is %s.' % (_label(menu), listed))
+	return ''.join(sentences)
+
+
+def _set_enable(pars: list, expr: str) -> None:
+	for p in pars:
+		if p.enableExpr != expr:
+			p.enableExpr = expr
 
 
 def _place_manifest(comp: COMP) -> None:

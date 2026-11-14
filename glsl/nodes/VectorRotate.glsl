@@ -8,6 +8,9 @@
 // @in float angle = 0.0 [-180 180]
 // @in vec3 rotation = 0.0 [-180 180]
 // @out vec3 result
+// @enable axis if rotation_type axis_angle
+// @enable angle unless rotation_type euler_xyz
+// @enable rotation if rotation_type euler_xyz
 // Blender's Vector Rotate: turns the vector around center. axis_angle uses axis and angle, the
 // three axis types use angle only, euler_xyz uses rotation; angles are in degrees. invert turns
 // the other way.

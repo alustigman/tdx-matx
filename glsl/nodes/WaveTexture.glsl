@@ -14,6 +14,8 @@
 // @out vec3 color
 // @out float fac
 // @requires fbm
+// @enable bands_direction if wave_type bands
+// @enable rings_direction if wave_type rings
 // Blender's Wave Texture: parallel bands or concentric rings. bands_direction and
 // rings_direction apply to their own wave type (rings around an axis, or spherical).
 // distortion warps the waves with fractal noise (detail, detail_scale, detail_roughness);

@@ -9,6 +9,8 @@
 // @in float to_max = 1.0
 // @in float steps = 4.0 [1 16]
 // @out float result
+// @enable steps if interpolation stepped_linear
+// @enable clamp_result if interpolation linear stepped_linear
 // Blender's Map Range: remaps value from the range from_min..from_max to to_min..to_max.
 // stepped_linear quantizes it into `steps` steps; smoothstep and smootherstep ease in and out
 // (and always stay inside the target range). clamp_result limits linear and stepped results to

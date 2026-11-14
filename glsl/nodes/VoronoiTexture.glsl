@@ -15,6 +15,11 @@
 // @out float w_out
 // @out float radius
 // @requires hash
+// @enable w if dimensions 1d 4d
+// @enable smoothness if feature smooth_f1
+// @enable metric unless feature distance_to_edge n_sphere_radius
+// @enable exponent if metric minkowski
+// @enable exponent unless feature distance_to_edge n_sphere_radius
 // Blender's Voronoi Texture: cells around randomly placed points. dimensions picks what is
 // sampled (1D is w alone, 2D vector.xy, 3D vector, 4D vector and w). feature picks the output:
 // F1 the distance to the closest point, F2 to the second closest, Smooth F1 a blended F1

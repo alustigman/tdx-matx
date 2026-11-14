@@ -6,6 +6,7 @@
 // @in vec3 rotation = 0.0 [-180 180]
 // @in vec3 scale = 1.0 [0 4]
 // @out vec3 result
+// @enable location unless mapping_type vector normal
 // Blender's Mapping: moves, rotates and scales a vector, usually texture coordinates on their
 // way into a texture. rotation is in degrees around x, y and z (applied in that order). Point
 // transforms the vector itself; Texture transforms the texture instead (the inverse: a location

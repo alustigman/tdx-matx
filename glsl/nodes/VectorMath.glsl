@@ -7,6 +7,9 @@
 // @in float scale = 1
 // @out vec3 vector
 // @out float value
+// @enable vector_b unless operation length scale normalize absolute floor ceil fraction sine cosine tangent
+// @enable vector_c if operation multiply_add faceforward wrap
+// @enable scale if operation scale refract
 // Blender's Vector Math node. Vector C is read by multiply_add, faceforward and wrap; Scale by
 // scale and refract (as the IOR). dot_product, distance and length write Value and leave Vector at
 // 0; the other operations write Vector and leave Value at 0. Operations that can fail (divide,

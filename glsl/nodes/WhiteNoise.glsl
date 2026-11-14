@@ -6,6 +6,7 @@
 // @out float value
 // @out vec3 color
 // @requires hash
+// @enable w if dimensions 1d 4d
 // A random value and colour for every distinct input (1D is w alone, 2D vector.xy, 3D vector,
 // 4D vector and w): no smoothing at all, so feed it stepped coordinates (a Voronoi position, a
 // floored vector) to get one random value per cell.

@@ -10,6 +10,9 @@
 // @in float softness = 0.005 [0 0.2]
 // @out float fac
 // @out float distance
+// @enable height unless shape polygon
+// @enable radius if shape rounded_rectangle
+// @enable sides if shape polygon
 // A 2D shape in the vector's xy plane, centred on center: fac is 1 inside and 0 outside (softness
 // is the width of the edge), distance is the signed distance to the outline (negative inside).
 // Circle is an ellipse of width by height; radius rounds the corners of the rounded rectangle;

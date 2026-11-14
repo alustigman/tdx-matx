@@ -284,6 +284,23 @@ class Codegen(unittest.TestCase):
 		self.assertEqual((spec['uniforms'], spec['driven']), (['time'], ['time']))
 		self.assertEqual(matx.spec_from_snippet(SNIPS['Value'])['driven'], [])
 
+	def test_enable_conditions(self):
+		snip = codegen.parse_snippet(
+			'// @type X\n// @menu mode a b c\n// @menu other on off\n// @in float x\n// @in float y\n'
+			'// @enable x y if mode b c\n// @enable y unless other off\n// @enable other if mode a\n'
+			'void matx_X() {}')
+		self.assertEqual(snip['enables'], {'x': [('mode', ['b', 'c'], True)],
+		                                   'y': [('mode', ['b', 'c'], True), ('other', ['off'], False)],
+		                                   'other': [('mode', ['a'], True)]})
+		self.assertEqual(SNIPS['Math']['enables']['c'][0][0], 'operation')
+		self.assertIn('4d', SNIPS['NoiseTexture']['enables']['w'][0][1])
+		for bad in ('// @enable x if mode', '// @enable x when mode a', '// @enable z if mode a',
+		            '// @enable x if nomenu a', '// @enable x if mode d', '// @enable mode if mode a',
+		            '// @enable v if mode a'):
+			with self.assertRaisesRegex(codegen.MatxError, '@enable'):
+				codegen.parse_snippet('// @type X\n// @menu mode a b c\n// @in float x\n// @in closure v\n'
+				                      '%s\nvoid matx_X() {}' % bad)
+
 	def test_menu_recorded_on_node(self):
 		spec = matx.spec_from_snippet(SNIPS['Math'])
 		self.assertNotIn('operation', spec['inputs'])

@@ -14,6 +14,10 @@
 // @in float distortion = 0.0 [0 4]
 // @out float fac
 // @out vec3 color
+// @enable w if dimensions 1d 4d
+// @enable normalize if type fbm
+// @enable offset if type hybrid_multifractal ridged_multifractal hetero_terrain
+// @enable gain if type hybrid_multifractal ridged_multifractal
 // Blender's Noise Texture on TouchDesigner's Perlin noise. dimensions picks what is sampled: 1D
 // is w alone, 2D vector.xy, 3D vector, 4D vector and w (animate w to evolve the pattern in
 // place). detail adds octaves (up to 15), roughness and lacunarity are their amplitude and
