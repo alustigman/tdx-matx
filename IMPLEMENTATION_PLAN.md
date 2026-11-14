@@ -4,7 +4,7 @@ See `README.md` for the project overview. This document is a living plan; items 
 
 ## 0. Where we left off (2026-11-14)
 
-**Repo:** `git@github.com:alustigman/tdx-matx.git`. Branch `feature/node-library` holds the node library work below (not merged into `main` yet).
+**Repo:** `git@github.com:alustigman/tdx-matx.git`. Branch `main`; the node library work below was done on `feature/node-library` and merged (fast-forward) at `ca3db53`.
 
 **Working end to end in TouchDesigner 2025.33230** (`matx-testingGround.toe`):
 - `/matx` is the library (op shortcut `Matx`): `core/` (Text DATs synced to `core/*.py`), `snippets/` (synced to `glsl/`), `nodes/` (generated node COMPs + `EvaluateShader`), `fam` (TDFam, the MATX TAB menu) and `scratch/`. The **Build** pulse on `/matx` regenerates `snippets/` and `nodes/` from `glsl/nodes/*.glsl`, and upgrades every node copy in the project (details in 3b).
