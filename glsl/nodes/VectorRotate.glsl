@@ -7,7 +7,7 @@
 // @in vec3 axis = 0.0 0.0 1.0 [-1 1]
 // @in float angle = 0.0 [-180 180]
 // @in vec3 rotation = 0.0 [-180 180]
-// @out vec3 result
+// @out vec3 result vector
 // @enable axis if rotation_type axis_angle
 // @enable angle unless rotation_type euler_xyz
 // @enable rotation if rotation_type euler_xyz

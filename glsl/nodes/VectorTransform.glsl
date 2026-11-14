@@ -4,7 +4,7 @@
 // @menu convert_from world object camera
 // @menu convert_to object world camera
 // @in vec3 vector = 0.0
-// @out vec3 result
+// @out vec3 result vector
 // Converts a vector between spaces: world, the geometry's object space (the Geometry COMP's
 // transform, without instancing) and the camera's space. Point moves a position (translation
 // included), Vector a direction, Normal a surface normal (renormalized).

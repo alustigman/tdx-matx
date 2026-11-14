@@ -4,7 +4,7 @@
 // @in float columns = 4.0 [1 16]
 // @in float rows = 4.0 [1 16]
 // @in float frame = 0.0 [0 16]
-// @out vec3 result
+// @out vec3 result vector
 // Texture coordinates of one cell of a sprite sheet of columns by rows cells, for a Sampler's
 // vector. frame counts from the top-left cell, row by row, and wraps around; drive it with a
 // Time node to play the sheet.

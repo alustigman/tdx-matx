@@ -4,7 +4,7 @@
 // @in vec3 center = 0.5 0.5 0.0 [0 1]
 // @in float radial_scale = 1.0
 // @in float length_scale = 1.0
-// @out vec3 result
+// @out vec3 result vector
 // Converts xy coordinates to polar ones around center: result.x is the distance from the centre
 // (times 2, so the edge of a 0-1 square is 1), result.y the angle as 0-1 around the circle.
 // Feed it to a texture to wrap the pattern into rings and spokes.

@@ -11,7 +11,7 @@ See `README.md` for the project overview. This document is a living plan; items 
 - `/matx_demo` is the user's test scene (a sphere shaded through `evaluate1`).
 - `/matx/scratch/rig` is the **shader test bench**: a POP plane and a SOP plane (or sphere) rendered with the material of `eval1`, driven by `tests/td_bench.py` (`H.compile_all()` compiles every node type on a real GLSL MAT, `H.sheet()` renders contact sheets).
 - 60 nodes in 6 groups, see section 2.
-- Unit tests: `python -m unittest discover -s tests` (31 tests, pure Python, no TD needed), including one that generates every snippet through every output.
+- Unit tests: `python -m unittest discover -s tests` (32 tests, pure Python, no TD needed), including one that generates every snippet through every output.
 
 **This branch's work (2026-11-14):**
 1. Geometry attributes by name (`@attrib`): TexCoord reads `Tex` by default, the Attribute node reads any POP attribute, and EvaluateShader declares them on the GLSL MAT's Attributes page (section 1.7).
@@ -20,6 +20,7 @@ See `README.md` for the project overview. This document is a living plan; items 
 4. A connected socket greys out its parameter; generated GLSL MATs compile threaded; `@in ... [low high]` slider ranges; snippet parsing memoized for the hosts.
 5. Fixes: the TDFam reinstall after a heavy build, binding of an Evaluate Shader wired in the frame it was placed, manifest placement on node copies.
 6. Menu-dependent parameters (`@enable`): a parameter a menu leaves unused is greyed out, like Blender hides it (Noise W outside 1D/4D, Math B for one-input operations and C outside Multiply Add, Compare, Smooth Min/Max and Wrap, and the like on Vector Math, Voronoi, White Noise, Map Range, Mapping, Shape, Vector Rotate, Wave).
+7. Socket colours from Blender (float grey, vector blue-violet, colour yellow, shader green): each In/Out DAT gets the colour of its socket kind (`codegen.socket_kind`), which the network editor shows on the COMP's connector; `@out vec3 result vector` says what an output carries when its name does not.
 
 **Loose ends:**
 - A Sampler, Color Ramp or Triplanar node without a TOP is a generation error (magenta fallback) until a TOP is set on it.
@@ -202,7 +203,7 @@ One `.glsl` file per node type, named after its `@type`, with one header line pe
 // @requires hash               (helper glsl/lib/hash.glsl, included once)
 void matx_Sampler(sampler2D image, vec3 vector, out vec3 color, out float alpha) { ... }
 ```
-Other header lines: `// @category <group>`, `// @menu <name> <item>...` (a compile-time constant, see 3b), `// @attrib <type> <name> = <Attribute> [texcoord|typed]` (a geometry attribute chosen by name, see 1.7), `// @uniform <input>` or `// @uniform <input> = <expression>`, and an `@in` may end with `[low high]`, the slider range of its parameter. `// @enable <name>... if|unless <menu> <item>...` greys out the parameters of those @in, @menu or @attrib entries unless (or while) the menu holds one of the items; several lines on one name must all hold. It only drives the UI.
+Other header lines: `// @category <group>`, `// @menu <name> <item>...` (a compile-time constant, see 3b), `// @attrib <type> <name> = <Attribute> [texcoord|typed]` (a geometry attribute chosen by name, see 1.7), `// @uniform <input>` or `// @uniform <input> = <expression>`, an `@out vec3/vec4` may end with `vector` or `color` (its socket colour when the name does not tell), and an `@in` may end with `[low high]`, the slider range of its parameter. `// @enable <name>... if|unless <menu> <item>...` greys out the parameters of those @in, @menu or @attrib entries unless (or while) the menu holds one of the items; several lines on one name must all hold. It only drives the UI.
 
 Function parameters come in header order: samplers, then menus, then attribs, then inputs, then `out` outputs. The header is the single source of truth: codegen, the node's Script DATs and the builder all read it, so there is no second declaration to keep in sync. Adding a node means adding a `.glsl` file and pressing Build.
 

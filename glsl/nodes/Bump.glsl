@@ -5,7 +5,7 @@
 // @in float distance = 1.0 [0 1]
 // @in float height = 1.0
 // @in vec3 normal = world_normal
-// @out vec3 result
+// @out vec3 result vector
 // Blender's Bump: perturbs the normal as if the surface were displaced by height (connect a
 // texture's fac), without moving geometry. distance is how far the height reaches, strength
 // blends the effect in, invert makes bumps into dents. The slope is measured between

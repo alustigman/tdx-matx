@@ -200,11 +200,24 @@ def _ensure_script(comp: COMP, name: str, callbacks_expr: str) -> OP:
 	return s
 
 
-def _ensure_io(comp: COMP, op_type, name: str, order: int, label: str) -> OP:
+# Blender's node socket colours (std_node_socket_colors), by socket kind (codegen.socket_kind).
+# The network editor draws a COMP's connector in the colour of the In/Out operator behind it.
+SOCKET_COLORS = {
+	'float':  (0.63, 0.63, 0.63),   # grey
+	'vector': (0.39, 0.39, 0.78),   # blue-violet
+	'color':  (0.78, 0.78, 0.16),   # yellow
+	'shader': (0.39, 0.78, 0.39),   # green
+}
+
+
+def _ensure_io(comp: COMP, op_type, name: str, order: int, label: str, kind: Optional[str] = None) -> OP:
+	"""Get-or-create a COMP's In/Out operator; `kind` colours its connector like a Blender socket."""
 	o = comp.op(name) or comp.create(op_type, name)
 	o.par.connectorder = order
 	if hasattr(o.par, 'label'):
 		o.par.label = label
+	if kind is not None:
+		o.color = SOCKET_COLORS[kind]
 	return o
 
 
@@ -286,9 +299,10 @@ def ensure_node_contents(comp: COMP, snip: dict, report: list) -> COMP:
 		_ensure_par(comp, inputs_page, matx.par_name(name), 'TOP', report, label,
 		            "TOP sampled by this node (a %s uniform bound on the Evaluate Shader's GLSL MAT)." % ty)
 	ins, outs = [], []
+	kind = op.Matx.op('core/codegen').module.socket_kind
 	for i, (ty, name, default) in enumerate(snip['ins']):
 		label = _label(name)
-		ins.append(_ensure_io(comp, inDAT, 'in_' + name, i, label))
+		ins.append(_ensure_io(comp, inDAT, 'in_' + name, i, label, kind(snip, ty, name)))
 		if ty == 'closure' or isinstance(default, str):   # closures and attribute defaults: connector only
 			continue
 		help_ = '%s (%s) used when the %s input is not connected.' % (label, ty, label)
@@ -303,12 +317,13 @@ def ensure_node_contents(comp: COMP, snip: dict, report: list) -> COMP:
 		_set_enable(pars, _enable_expr(snip, name, matx, connector=i))
 	_remove_stale(comp, 'in_', {o.name for o in ins}, report)
 
-	sockets = [name for (_, name) in snip['outs']] or [None]
+	sockets = snip['outs'] or [(None, None)]
 	scripts = []
-	for i, sock in enumerate(sockets):
+	for i, (ty, sock) in enumerate(sockets):
 		sname = 'graph_' + sock if sock else 'graph'
 		s = _ensure_script(comp, sname, NODE_CALLBACKS)
-		o = _ensure_io(comp, outDAT, 'out_' + (sock or 'graph'), i, _label(sock) if sock else 'Graph')
+		o = _ensure_io(comp, outDAT, 'out_' + (sock or 'graph'), i, _label(sock) if sock else 'Graph',
+		               kind(snip, ty, sock) if sock else None)
 		if not o.inputs or o.inputs[0] != s:
 			s.outputConnectors[0].connect(o.inputConnectors[0])
 		scripts.append(s)
@@ -473,7 +488,7 @@ def ensure_evaluate_contents(comp: COMP, report: list, material_out: bool = True
 
 	material_out adds an Out MAT `out1` fed by glsl_mat, so the generated material leaves the
 	COMP on a connector (wire it to a Null MAT and point Geometry COMPs at that)."""
-	src = _ensure_io(comp, inDAT, 'in_graph', 0, 'Surface')
+	src = _ensure_io(comp, inDAT, 'in_graph', 0, 'Surface', 'shader')   # Blender's Material Output
 	vertex = _ensure_script(comp, 'vertex', EVAL_CALLBACKS)
 	pixel = _ensure_script(comp, 'pixel', EVAL_CALLBACKS)
 	samplers = _ensure_script(comp, 'samplers', EVAL_CALLBACKS)

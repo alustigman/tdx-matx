@@ -301,6 +301,16 @@ class Codegen(unittest.TestCase):
 				codegen.parse_snippet('// @type X\n// @menu mode a b c\n// @in float x\n// @in closure v\n'
 				                      '%s\nvoid matx_X() {}' % bad)
 
+	def test_socket_kinds(self):
+		kind = codegen.socket_kind
+		self.assertEqual([kind(SNIPS['Mapping'], 'vec3', 'result'), kind(SNIPS['MixColor'], 'vec3', 'result'),
+		                  kind(SNIPS['NoiseTexture'], 'float', 'fac'),
+		                  kind(SNIPS['PrincipledBSDF'], 'closure', 'bsdf'), kind(SNIPS['Mapping'], 'vec3', 'vector')],
+		                 ['vector', 'color', 'float', 'shader', 'vector'])
+		self.assertEqual(SNIPS['TexCoord']['kinds'], {'window': 'vector'})
+		with self.assertRaisesRegex(codegen.MatxError, '@out'):
+			codegen.parse_snippet('// @type X\n// @out float f vector\nvoid matx_X() {}')
+
 	def test_menu_recorded_on_node(self):
 		spec = matx.spec_from_snippet(SNIPS['Math'])
 		self.assertNotIn('operation', spec['inputs'])

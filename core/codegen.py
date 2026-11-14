@@ -12,6 +12,8 @@ Snippet files (glsl/nodes/*.glsl) start with a header of `// @key value` lines:
     // @in    float angle = 0.0 [-180 180]   (optional slider range of the node's parameter)
     // @in    vec3 coord = uv    (a default naming an ATTRIBUTE reads it when unconnected)
     // @out   float fac
+    // @out   vec3 result vector  (vector|color: what a vec3/vec4 carries when its name does not
+                                   tell, see socket_kind; it only picks the socket's colour)
     // @attr  uv                 (vertex attribute the snippet reads, see ATTRIBUTES)
     // @requires hash            (helper file glsl/lib/hash.glsl, included once)
     // @sampler sampler2D image  (a texture per node instance, see SAMPLER_TYPES)
@@ -140,12 +142,13 @@ def parse_snippet(text):
 	"""Returns dict(type, samplers=[(type,name)], menus=[(name,[items])], ins=[(type,name,default)],
 	outs=[(type,name)], attrs, requires, uniforms, driven={uniform: expression},
 	attribs=[(type,name,default attribute,flavor)], ranges={input: (low, high)},
-	enables={parameter: [(menu, [items], True for `if` / False for `unless`)]}, category, body).
+	enables={parameter: [(menu, [items], True for `if` / False for `unless`)]},
+	kinds={output: 'vector' | 'color'} (from `@out vec3 result vector`), category, body).
 	A default is a float, a list of floats, an attribute name or None. @enable only drives the
 	node's UI: the shader is the same whatever is greyed out."""
 	snip = {'type': None, 'samplers': [], 'ins': [], 'outs': [], 'attrs': [], 'requires': [],
 	        'uniforms': [], 'driven': {}, 'menus': [], 'attribs': [], 'ranges': {}, 'enables': {},
-	        'category': None}
+	        'kinds': {}, 'category': None}
 	body = []
 	for line in text.splitlines():
 		m = re.match(r'\s*//\s*@(\w+)\s*(.*?)\s*$', line)
@@ -169,10 +172,13 @@ def parse_snippet(text):
 				except ValueError:
 					raise MatxError('bad @in range: %r' % line)
 		elif key == 'out':
-			m2 = re.match(r'(\w+)\s+(\w+)$', rest)
-			if not m2 or m2.group(1) not in TYPES:
-				raise MatxError('bad @out line: %r' % line)
+			m2 = re.match(r'(\w+)\s+(\w+)(?:\s+(vector|color))?$', rest)
+			if not m2 or m2.group(1) not in TYPES or (m2.group(3) and m2.group(1) not in ('vec3', 'vec4')):
+				raise MatxError('bad @out line (want: type name [vector|color], vector/color on vec3/vec4): %r'
+				                % line)
 			snip['outs'].append((m2.group(1), m2.group(2)))
+			if m2.group(3):
+				snip['kinds'][m2.group(2)] = m2.group(3)
 		elif key == 'attr':
 			for a in rest.split():
 				if a not in ATTRIBUTES:
@@ -329,6 +335,18 @@ def convert(expr, src, dst):
 def is_color(type_, name):
 	"""vec3/vec4 sockets are colours unless the name looks spatial (vector, normal, uv, ...)."""
 	return type_ in ('vec3', 'vec4') and not any(w in name.lower() for w in SPATIAL_WORDS)
+
+
+def socket_kind(snip, type_, name):
+	"""What a socket carries, as Blender colours it: 'float', 'vector', 'color' or 'shader'. A
+	vec3/vec4 is a colour unless its name looks spatial (is_color) or its @out line says which."""
+	if type_ == CLOSURE:
+		return 'shader'
+	if type_ == 'float':
+		return 'float'
+	if name in snip.get('kinds', {}):
+		return snip['kinds'][name]
+	return 'color' if is_color(type_, name) else 'vector'
 
 
 def _ident(node_id):

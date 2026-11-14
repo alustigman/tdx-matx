@@ -37,6 +37,7 @@ tdx-matx works with [TDFam](https://github.com/dotsimulate/TDFam), the open-sour
 
 - **Each node is one file**, `glsl/nodes/<Type>.glsl`: a header of `// @...` lines declaring its sockets, menus and attributes, then a GLSL function. The comment above the function documents the node. Press **Edit Shader** on any node to open its file; saving it updates every node of that type.
 - **Textures default to the mesh UV.** A texture node's unconnected Vector reads the geometry's texture coordinates; connect a Tex Coord, Mapping, Geometry or any vector to change that.
+- **Sockets are coloured like Blender's**: grey for a float, blue-violet for a vector, yellow for a colour, green for a shader. TouchDesigner draws the colour as a band where the wire attaches and as an outline on an empty connector (it comes from the In/Out DAT behind the connector).
 - **Menus are compile-time constants** (the Noise type, the Voronoi feature, a Math operation): changing one recompiles the shader, everything else is an input you can wire.
 - **A connected input greys out its parameter**, the way Blender hides a socket's value field, and so does a menu that leaves it unused: Noise's W outside 1D and 4D, Math's C outside Multiply Add, Compare, Smooth Min/Max and Wrap. A snippet declares it with `// @enable c if operation multiply_add ...`.
 

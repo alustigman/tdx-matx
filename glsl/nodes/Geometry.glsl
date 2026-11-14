@@ -2,7 +2,7 @@
 // @category Input
 // @out vec3 position
 // @out vec3 normal
-// @out vec3 incoming
+// @out vec3 incoming vector
 // @out vec3 object_position
 // @out vec3 object_normal
 // @out float backfacing
