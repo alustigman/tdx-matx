@@ -20,21 +20,41 @@ tdx-matx works with [TDFam](https://github.com/dotsimulate/TDFam), the open-sour
 
 | Group | Nodes |
 |---|---|
-| Input | Tex Coord, Value, RGB, XYZ |
-| Texture | Noise Texture, Sampler |
-| Color | Mix Color |
-| Converter | Math, Vector Math, Separate XYZ, Combine XYZ, Shader To RGB |
-| Shader | Principled BSDF, Emission Shader |
+| Input | Tex Coord, Attribute, Vertex Color, Geometry, Camera Data, Fresnel, Layer Weight, Time, Value, RGB, XYZ |
+| Texture | Noise, Voronoi, White Noise, Wave, Checker, Brick, Gradient, Magic, Shape, Sampler, Triplanar |
+| Color | Mix Color, Invert Color, Hue Saturation, Brightness Contrast, Gamma, Posterize |
+| Converter | Math, Vector Math, Map Range, Clamp, Mix Float, Mix Vector, Separate / Combine XYZ, Separate / Combine Color, RGB To BW, Blackbody, Color Ramp, Shader To RGB |
+| Vector | Mapping, Vector Rotate, Vector Transform, Normal Map, Bump, Polar Coordinates, Twirl, Flipbook, Matcap UV |
+| Shader | Principled BSDF, Diffuse BSDF, Glossy BSDF, Toon BSDF, Emission Shader, Transparent BSDF, Mix Shader, Add Shader |
 | Output | Evaluate Shader |
 
 - Press **Build** on `/matx` (Matx page): besides regenerating the nodes, it loads the TDFam component into `/matx/fam` from `third_party/TDFam/TDFam_create.tox` if it is missing, points it at `/matx/nodes`, and writes each node's menu label and group into its TDFam manifest. A new snippet joins the menu on the next Build; its group comes from the snippet's `// @category` header line. When a library node is not in the family colour (a node Build just created, say), Build turns the family's **Install** toggle off and back on a few frames later, which recolours the library.
 - Placing a node from the TAB menu copies the library node with the family colour (set it on `/matx/fam`, Family page), with its **Preview** on (the family's callbacks DAT, `core/td_fam_callbacks.py`, which Build sets as `/matx/fam`'s Callback DAT). Every node also has an **Edit Shader** pulse that opens its `glsl/nodes/<type>.glsl` in your external editor. Placing from Python: `op.Matx.op('fam').PlaceOp(target_comp, 'Noise')`.
 - TDFam is vendored under the Apache License 2.0; its `LICENSE` and `NOTICE` are kept in `third_party/TDFam/`.
 
+## Nodes
+
+60 nodes, most of them ports of Blender's shader nodes (same inputs, same maths), plus a few from other shader graphs (Shape, Triplanar, Twirl, Flipbook, Matcap UV, Posterize, Toon BSDF) and some that only make sense in TouchDesigner (Sampler and Color Ramp read a TOP, Time is a uniform driven by `absTime.seconds`).
+
+- **Each node is one file**, `glsl/nodes/<Type>.glsl`: a header of `// @...` lines declaring its sockets, menus and attributes, then a GLSL function. The comment above the function documents the node. Press **Edit Shader** on any node to open its file; saving it updates every node of that type.
+- **Textures default to the mesh UV.** A texture node's unconnected Vector reads the geometry's texture coordinates; connect a Tex Coord, Mapping, Geometry or any vector to change that.
+- **Menus are compile-time constants** (the Noise type, the Voronoi feature, a Math operation): changing one recompiles the shader, everything else is an input you can wire.
+- **A connected input greys out its parameter**, the way Blender hides a socket's value field.
+
+### Geometry attributes (POPs)
+
+Shaders read geometry attributes by name, so anything a POP network computes can drive a material:
+
+- **Tex Coord** has an Attribute parameter, `Tex` by default: the POP texture attribute, and texture layer 0 of a SOP.
+- **Attribute** reads any attribute (`Color`, `PartAge`, a custom one). Set its type to the attribute's size (Float, Vec2, Vec3, Vec4): TouchDesigner needs the exact size.
+- **Vertex Color** is the point colour (`Color`), **Geometry** gives position and normal.
+
+Evaluate Shader declares every attribute the graph reads on its GLSL MAT's **Attributes** page, the same way it fills the Samplers, Colors and Vectors pages. A missing attribute reads as 0.
+
 ## Scope
 
 - Target: **GLSL MAT only** (vertex + pixel shader), TouchDesigner's GLSL 3.30+ dialect, using the built-in TD functions (`TDLightingPBR`, `TDEnvLightingPBR`, `TDPerlinNoise`, `TDSimplexNoise`, `TDRGBToHSV`, `TDOutputSwizzle`, ...). Reference: <https://docs.derivative.ca/Write_a_GLSL_Material>
-- Shading model, v1: **PBR** (a Principled-BSDF-like node). The architecture must allow additional shading nodes later (Diffuse, Glossy, Emission, Phong, Toon, ...), as Blender does, and mixing them (Mix Shader / Add Shader).
+- Shading: **PBR** through TouchDesigner's own lighting functions (Principled, Diffuse, Glossy and Toon BSDFs, Emission, Transparent), mixed with Mix Shader / Add Shader as in Blender.
 - Out of scope for now: GLSL TOP/POP targets, geometry shaders, node-group nesting, a custom node-editor UI (we use TD's own network editor).
 
 ## Concepts
@@ -93,8 +113,8 @@ tdx-matx/
   third_party/TDFam/         vendored TDFam (TDFam_create.tox + LICENSE + NOTICE), see "Works with TDFam"
   tdx-matx.toe               the project file; all node COMPs live inside it for now (exportable to .tox later)
   nodes/                     (later) exported .tox per node, grouped by category
-  glsl/                      shared GLSL helper library and per-node snippets
-  core/                      shared Python (matx.py: graph JSON + node builder, codegen.py: graph -> GLSL) (graph merge, JSON helpers, codegen) used by all Script DATs
+  glsl/                      nodes/ (one snippet per node type) and lib/ (helpers shared through @requires: view, lighting, hash, fbm)
+  core/                      shared Python (matx.py: graph JSON + node builder, codegen.py: graph -> GLSL, td_builder.py: builds the library in TD) used by all Script DATs
   examples/                  demo .toe files
-  tests/                     pure-Python tests for graph merging and codegen (run outside TD)
+  tests/                     pure-Python tests for graph merging and codegen (run outside TD); td_bench.py drives the shader test bench inside TD (/matx/scratch/rig)
 ```

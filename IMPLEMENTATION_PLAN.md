@@ -2,31 +2,36 @@
 
 See `README.md` for the project overview. This document is a living plan; items under **Open questions** need a decision.
 
-## 0. Where we left off (2026-10-10)
+## 0. Where we left off (2026-11-14)
 
-**Repo:** `git@github.com:alustigman/tdx-matx.git`, branch `main`. Last feature commit `b1f7758` (Sampler node).
+**Repo:** `git@github.com:alustigman/tdx-matx.git`. Branch `feature/node-library` holds the node library work below (not merged into `main` yet).
 
 **Working end to end in TouchDesigner 2025.33230** (`matx-testingGround.toe`):
-- `/matx` is the library (op shortcut `Matx`): `core/` (Text DATs synced to `core/*.py`), `snippets/` (synced to `glsl/`), `nodes/` (generated node COMPs + `EvaluateShader`). The **Build** pulse on `/matx` regenerates `snippets/` and `nodes/` from `glsl/nodes/*.glsl` (details in 3b).
-- `/matx_demo` is the test scene: TexCoord1 -> Noise1 -> MixColor1 (A = RGB1, B = Sampler1 reading `ramp1`) -> PrincipledBSDF -> evaluate1 -> `geo1` sphere -> `render1`. RGB2 and EmissionShader sit unwired.
-- Nodes: TexCoord, Value, RGB, NoiseTexture, MixColor, Sampler, PrincipledBSDF, EmissionShader, ShaderToRGB, plus EvaluateShader (which is also the material output).
-- Unit tests: `python -m unittest discover -s tests` (18 tests, pure Python, no TD needed).
+- `/matx` is the library (op shortcut `Matx`): `core/` (Text DATs synced to `core/*.py`), `snippets/` (synced to `glsl/`), `nodes/` (generated node COMPs + `EvaluateShader`), `fam` (TDFam, the MATX TAB menu) and `scratch/`. The **Build** pulse on `/matx` regenerates `snippets/` and `nodes/` from `glsl/nodes/*.glsl`, and upgrades every node copy in the project (details in 3b).
+- `/matx_demo` is the user's test scene (a sphere shaded through `evaluate1`).
+- `/matx/scratch/rig` is the **shader test bench**: a POP plane and a SOP plane (or sphere) rendered with the material of `eval1`, driven by `tests/td_bench.py` (`H.compile_all()` compiles every node type on a real GLSL MAT, `H.sheet()` renders contact sheets).
+- 60 nodes in 7 groups, see section 2.
+- Unit tests: `python -m unittest discover -s tests` (30 tests, pure Python, no TD needed), including one that generates every snippet through every output.
 
-**Last session's work:**
-1. TD crashed when a non-MaterialOutput node was plugged into EvaluateShader. Cause: a rendered GLSL MAT whose shader DATs are empty crashes TD. Fix: EvaluateShader always outputs a valid shader (`codegen.fallback()`, flat magenta) and reports the error on its `vertex`/`pixel` DATs.
-2. Sampler node with dynamic GLSL MAT samplers (mechanism in 3b). Verified live: the texture shows, changing the TOP rebinds, two Samplers give two blocks, a missing TOP gives an error + the magenta fallback.
-3. The builder finds renamed library nodes by their `Nodetype` (the library's NoiseTexture node is named `Noise`), instead of creating duplicates.
+**This branch's work (2026-11-14):**
+1. Geometry attributes by name (`@attrib`): TexCoord reads `Tex` by default, the Attribute node reads any POP attribute, and EvaluateShader declares them on the GLSL MAT's Attributes page (section 1.7).
+2. Driven uniforms (`@uniform time = absTime.seconds`) for the Time node.
+3. 46 new nodes and reworked Noise, Mix Color, Math, Principled BSDF, Emission and TexCoord (section 2), with `glsl/lib/` helpers (`view`, `lighting`, `hash`, `fbm`).
+4. A connected socket greys out its parameter; generated GLSL MATs compile threaded; `@in ... [low high]` slider ranges; snippet parsing memoized for the hosts.
+5. Fixes: the TDFam reinstall after a heavy build, binding of an Evaluate Shader wired in the frame it was placed, manifest placement on node copies.
 
 **Loose ends:**
-- The old scratch copies (RGB1, RGB2, Noise1, MixColor1, TexCoord1) moved from `/matx/nodes` to `/matx/scratch`, wiring kept, so that every COMP in `nodes/` is a library node (TDFam publishes all of them).
-- EvaluateShader copies made before `b1f7758` lack the `samplers` + `sampler_exec` ops. Upgrade one with `op.Matx.op('core/td_builder').module.ensure_evaluate_contents(op('<path>'), [])` (already done for `/matx_demo/evaluate1`).
-- TD exited right after the last save without a crash dump; cause unknown, nothing lost.
+- A Sampler, Color Ramp or Triplanar node without a TOP is a generation error (magenta fallback) until a TOP is set on it.
+- Transparency (Transparent BSDF, Mix Shader towards nothing) needs Blending turned on by hand on the Evaluate Shader's `glsl_mat` (Common page).
+- Bump measures the height's slope between neighbouring pixels (`dFdx`/`dFdy`), so hard-edged heights look blocky up close.
+- Vector Transform's object space is the Geometry COMP's transform; it does not include instancing.
+- Compiling a node preview happens when its viewer is drawn; `H.compile_all()` is the way to compile-check everything.
 
 **Suggested next steps**, in order:
 1. Surface GLSL MAT compile errors on EvaluateShader (read `glsl_mat_info`, report on the `pixel` DAT), so a broken snippet is visible without opening the MAT. Map graph node ids (`n<op id>`) back to COMP paths in error messages.
-2. Remaining Phase 2 nodes: Color Ramp, Normal Map (Math, Vector Math, XYZ, Separate/Combine XYZ are done). Color Ramp can be a Sampler over a Ramp TOP, or keys baked into GLSL.
-3. Sampler options: expose extend / filter on the Sampler node and carry them through the `samplers` table to the MAT's `sampler<i>extendu/v` and `sampler<i>filter`.
-4. Phase 3: Mix Shader, Add Shader, Diffuse, Glossy, Transparent; alpha and blending.
+2. Sampler options: expose extend / filter on the Sampler node and carry them through the `samplers` table to the MAT's `sampler<i>extendu/v` and `sampler<i>filter`. A default texture for a sampler without a TOP.
+3. A Blending / alpha option on EvaluateShader, so transparent closures work without opening the MAT.
+4. Vertex-stage nodes (Displacement), instancing attributes, more `@uniform` inputs.
 
 **New machine setup:** clone the repo, open `matx-testingGround.toe` in TouchDesigner with Embody installed (Envoy writes `.mcp.json`), then start Claude Code in the repo. The snippet DATs point at `glsl/...` by relative path (Build sets them). If the `core/` DATs come up empty or with errors, check their File parameter points at `core/<name>.py` relative to the project folder.
 
@@ -96,17 +101,30 @@ Algorithm:
 - The **Sampler** node (Blender's Image Texture) has a TOP parameter. Evaluate Shader gathers these into its `samplers` table and binds them on the GLSL MAT's Samplers page, one block per Sampler node (implemented, see 3b).
 - Constants are baked into the shader as literals (recompile on change), unless the node's **As Uniform** toggle is on (Value, RGB): then the input is a uniform bound on the MAT's Colors page (colours) or Vectors page (anything else), so it can be animated without recompiling (see 3b).
 
-## 2. Node catalogue (target)
+### 1.7 Geometry attributes (POPs)
+
+- A snippet reads a geometry attribute whose **name is chosen on the node** with `// @attrib <type> <name> = <Default> [texcoord | typed]`. The builder gives the node a Str parameter (and a `<Name>type` menu for a `typed` one), the node's graph entry carries `"attribs": {"<name>": ["<Attribute>", "<type>"]}`, and the function receives the value as a parameter after the menus.
+- Codegen reads it in the vertex shader with `TDAttrib_<Name>()` and passes it through the `Vertex` block as `attr_<Name>` (one member per attribute, shared by every node that reads it). `generate()` returns `attribs`: `[name, float | float2 | float3 | float4]` rows.
+- EvaluateShader's `attribs` Script DAT + `attrib_exec` DAT Execute (`td_eval_callbacks.apply_attribs`) declare them on `glsl_mat`'s **Attributes page**, which is what makes `TDAttrib_<Name>()` exist: the same mechanism as the `uniforms` table and the Colors / Vectors pages.
+- Probed live on 2025.33230: a missing attribute reads 0; the declared size **must match** the geometry's attribute or the values are garbage (hence the Attribute node's type menu); `TDTexCoord(0u)` is empty for POPs.
+- Texture coordinates therefore use `TDTexAttrib_<Name>(0u)` (`texcoord` flavour), which is the POP attribute for POPs and `uv[0]` for SOPs. The built-in `uv` attribute (a texture node's unconnected vector, `@attr uv`) is `Tex` read that way, so it works on both. The TexCoord node has an Attribute parameter, `Tex` by default.
+- A driven uniform, `// @uniform <input> = <expression>`, is always bound as a uniform and its parameter is created running the expression: the Time node's `absTime.seconds` animates shaders without recompiling.
+
+## 2. Node catalogue
+
+Implemented (60). The group is the snippet's `@category`, which is also its group in the MATX TAB menu.
 
 | Category | Nodes |
 |---|---|
-| Input | Texture Coordinate, Geometry (position, normal, tangent), Vertex Color, Camera/View Vector, Value, RGB, Time |
-| Texture | Image Texture, Noise (Perlin/Simplex via `TDPerlinNoise` / `TDSimplexNoise`), Voronoi, Checker, Gradient, Wave |
-| Color | Mix Color, Color Ramp, Hue/Saturation/Value, Brightness/Contrast, Invert, Gamma, RGB Curves (later) |
-| Vector | Mapping, Normal Map, Bump, Vector Math, Vector Rotate |
-| Converter | Math, Map Range, Clamp, Separate/Combine XYZ & RGB, Color <-> HSV, Fresnel/Layer Weight |
-| Shader | **Principled BSDF (PBR, v1)**, Diffuse, Glossy, Emission, Transparent, Mix Shader, Add Shader; later Phong, Toon |
-| Output | **Evaluate Shader** (also the material output: surface; displacement later) |
+| Input | Tex Coord (uv from a named attribute, window), Attribute, Vertex Color, Geometry (position, normal, incoming, object position and normal, backfacing), Camera Data, Fresnel, Layer Weight, Time, Value, RGB, XYZ |
+| Texture | Noise Texture (1D-4D; fBM, multifractal, hybrid, ridged, hetero terrain), Voronoi Texture (1D-4D; F1, F2, Smooth F1, distance to edge, n-sphere radius; 4 metrics), White Noise, Wave, Checker, Brick, Gradient, Magic, Shape (circle, rectangle, rounded rectangle, polygon), Sampler (a TOP), Triplanar (a TOP, no UVs) |
+| Color | Mix Color (19 blend types), Invert Color, Hue Saturation, Brightness Contrast, Gamma, Posterize |
+| Converter | Math (41 operations), Vector Math (27), Map Range, Clamp, Mix Float, Mix Vector, Separate / Combine XYZ, Separate / Combine Color (RGB, HSV, HSL), RGB To BW, Blackbody, Color Ramp (a Ramp TOP), Shader To RGB |
+| Vector | Mapping, Vector Rotate, Vector Transform, Normal Map, Bump, Polar Coordinates, Twirl, Flipbook, Matcap UV |
+| Shader | Principled BSDF, Diffuse BSDF, Glossy BSDF, Toon BSDF, Emission Shader, Transparent BSDF, Mix Shader, Add Shader |
+| Output | Evaluate Shader (also the material output) |
+
+Not done: RGB Curves / Float Curve (use Color Ramp with any lookup TOP), Displacement and other vertex-stage nodes, Light Path, Object Info, environment / sky textures, Gabor.
 
 ## 3. Phases
 
@@ -120,17 +138,17 @@ Algorithm:
 - Snippet format and loader (see 4.2). Codegen with topo sort, dedupe, cycle detection, conversions.
 - Pure-Python unit tests for merge + codegen (golden GLSL strings), run outside TD.
 
-**Phase 2 — Minimal usable set** (current phase)
-- Nodes done: Texture Coordinate, Value, RGB, Mix Color, Noise, Image Texture (Sampler), Principled BSDF, Math, Vector Math, XYZ, Separate XYZ, Combine XYZ, Evaluate Shader as the material output. Remaining: Color Ramp, Normal Map.
+**Phase 2 — Minimal usable set** (done)
+- Done (see section 2 for the node list).
 - Evaluate Shader with GLSL MAT auto-setup and sampler binding: done. Compile-error reporting: remaining.
 - Example `.toe` with a textured PBR sphere: done (`/matx_demo`).
 
-**Phase 3 — Shader mixing and more shading models**
-- Closure struct; Diffuse, Glossy, Emission, Transparent, Mix Shader, Add Shader.
-- Alpha/blending handling (alpha test, OIT via `TDCheckDiscard`).
+**Phase 3 — Shader mixing and more shading models** (nodes done)
+- Closure struct; Diffuse, Glossy, Toon, Emission, Transparent, Mix Shader, Add Shader: done. An unconnected closure input is an empty closure (no light, alpha 0).
+- Alpha/blending handling (alpha test, OIT via `TDCheckDiscard`): the shader outputs alpha; turning Blending on is still manual.
 
-**Phase 4 — Breadth and polish**
-- Rest of catalogue, As Uniform on more nodes (any `@in` can be marked `@uniform`), vertex-stage nodes (displacement), instancing support.
+**Phase 4 — Breadth and polish** (current phase)
+- Rest of catalogue: done except the items listed under section 2. Remaining: As Uniform on more nodes (any `@in` can be marked `@uniform`), vertex-stage nodes (displacement), instancing support.
 - Palette entries / consistent component styling and socket colors, docs per node, optional node-creation helper (script that generates a node COMP from a declarative spec to keep all `.tox` consistent).
 
 ## 3b. Status
@@ -184,7 +202,9 @@ One `.glsl` file per node type, named after its `@type`, with one header line pe
 // @requires hash               (helper glsl/lib/hash.glsl, included once)
 void matx_Sampler(sampler2D image, vec3 vector, out vec3 color, out float alpha) { ... }
 ```
-Function parameters come in header order: samplers, then inputs, then `out` outputs. The header is the single source of truth: codegen, the node's Script DATs and the builder all read it, so there is no second declaration to keep in sync. Adding a node means adding a `.glsl` file and pressing Build.
+Other header lines: `// @category <group>`, `// @menu <name> <item>...` (a compile-time constant, see 3b), `// @attrib <type> <name> = <Attribute> [texcoord|typed]` (a geometry attribute chosen by name, see 1.7), `// @uniform <input>` or `// @uniform <input> = <expression>`, and an `@in` may end with `[low high]`, the slider range of its parameter.
+
+Function parameters come in header order: samplers, then menus, then attribs, then inputs, then `out` outputs. The header is the single source of truth: codegen, the node's Script DATs and the builder all read it, so there is no second declaration to keep in sync. Adding a node means adding a `.glsl` file and pressing Build.
 
 ### 4.3 Validation
 Implemented inside `codegen.generate` (missing output, wrong root type, missing node or snippet, closure type mismatch, cycle, sampler without a TOP) and `matx.make_node` (a failing node writes `error` into the graph, which propagates downstream). Errors name graph node ids (`n<op id>`), not COMP paths; mapping ids back to paths for EvaluateShader's message is still open.
