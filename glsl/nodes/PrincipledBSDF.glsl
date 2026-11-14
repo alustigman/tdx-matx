@@ -9,19 +9,19 @@
 // @in float ambient_occlusion = 1.0
 // @in float shadow_strength = 1.0
 // @in vec3 shadow_color = 0.0
+// @in float emission_strength = 1.0
+// @in vec3 normal = world_normal
 // @out closure bsdf
-// @attr color world_pos world_normal camera_index
+// @attr color
+// @requires lighting
+// TouchDesigner's PBR material as a shading node, following the PBR MAT's exported shader:
+// vertex colour multiplies the base colour, alpha is premultiplied. `normal` takes a Normal Map
+// or Bump node; unconnected it is the surface normal.
 void matx_PrincipledBSDF(vec3 base_color, float metallic, float roughness, float specular_level,
                          vec3 emission, float alpha, float ambient_occlusion,
-                         float shadow_strength, vec3 shadow_color, out MatxClosure bsdf)
+                         float shadow_strength, vec3 shadow_color, float emission_strength,
+                         vec3 normal, out MatxClosure bsdf)
 {
-	vec3 diffuseSum = vec3(0.0);
-	vec3 specularSum = vec3(0.0);
-
-	vec3 worldSpaceNorm = normalize(iVert.worldSpaceNorm.xyz);
-	vec3 normal = worldSpaceNorm;
-	vec3 viewVec = normalize(uTDMats[iVert.cameraIndex].camInverse[3].xyz - iVert.worldSpacePos.xyz);
-
 	vec4 vertColor = TDPixelColor(iVert.color);
 
 	// 0.08 is the value for dielectric specular that
@@ -30,37 +30,11 @@ void matx_PrincipledBSDF(vec3 base_color, float metallic, float roughness, float
 
 	vec4 finalBaseColor = vec4(base_color * alpha, alpha) * vertColor;
 
-	// A roughness of exactly 0 is not allowed
-	roughness = max(roughness, 0.0001);
-
 	vec3 pbrDiffuseColor = finalBaseColor.rgb * (1.0 - metallic);
 	vec3 pbrSpecularColor = mix(vec3(specLevel), finalBaseColor.rgb, metallic);
 
-	// Flip the normals on backfaces
-	if (!TDFrontFacing(iVert.worldSpacePos.xyz, worldSpaceNorm.xyz))
-	{
-		normal = -normal;
-	}
-
-	for (int i = 0; i < TD_NUM_LIGHTS; i++)
-	{
-		TDPBRResult res;
-		res = TDLightingPBR(i, pbrDiffuseColor, pbrSpecularColor, iVert.worldSpacePos.xyz,
-		                    normal, shadow_strength, shadow_color, viewVec, roughness);
-		diffuseSum += res.diffuse;
-		specularSum += res.specular;
-	}
-
-	// Environment lights
-	for (int i = 0; i < TD_NUM_ENV_LIGHTS; i++)
-	{
-		TDPBRResult res;
-		res = TDEnvLightingPBR(i, pbrDiffuseColor, pbrSpecularColor, normal, viewVec,
-		                       roughness, ambient_occlusion);
-		diffuseSum += res.diffuse;
-		specularSum += res.specular;
-	}
-
-	bsdf.radiance = diffuseSum + specularSum + emission;
+	bsdf.radiance = matx_pbr_lighting(pbrDiffuseColor, pbrSpecularColor, normal, roughness,
+	                                  ambient_occlusion, shadow_strength, shadow_color)
+	                + emission * emission_strength;
 	bsdf.alpha = finalBaseColor.a;
 }

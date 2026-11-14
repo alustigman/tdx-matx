@@ -96,6 +96,10 @@ ATTRIBUTE_GEO = {'uv': ('Tex', 'vec3')}
 # The shader output (fog) reads these whatever the graph contains.
 SURFACE_ATTRS = ('world_pos', 'camera_index')
 
+# What an unconnected closure input is: no light and no coverage, so adding it changes nothing
+# and mixing towards it fades the surface out.
+EMPTY_CLOSURE = 'MatxClosure(vec3(0.0), 0.0)'
+
 PIXEL_PREAMBLE = '''\
 struct MatxClosure {
 	vec3 radiance;
@@ -432,6 +436,9 @@ def generate(graph, snippets, lib=None):
 				else:
 					uniforms.append((GLSL_TYPE[ty], uniform, ref[0], ref[1], 'vector'))
 					args.append(uniform)
+				continue
+			if v is None and ty == CLOSURE:
+				args.append(EMPTY_CLOSURE)   # an unconnected shader input
 				continue
 			if v is None:
 				raise MatxError('node %s (%s): input %r has no value' % (nid, t, name))

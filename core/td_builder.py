@@ -314,8 +314,19 @@ def ensure_node_contents(comp: COMP, snip: dict, report: list) -> COMP:
 	_remove_stale(comp, 'graph', {s.name for s in scripts}, report)
 	_remove_stale(comp, 'out_', {o.name for o in outs}, report)
 	_place_columns([ins + [par_exec], scripts, outs])
+	_place_manifest(comp)
 	set_preview(comp, report)
 	return comp
+
+
+def _place_manifest(comp: COMP) -> None:
+	"""Moves a node's TDFam manifest (dropped by TDFam at a fixed spot) under its other operators."""
+	manifest = comp.op('FamManifest')
+	others = [c for c in comp.children if c != manifest]
+	if manifest is None or not others:
+		return
+	manifest.nodeX = 0
+	manifest.nodeY = min(c.nodeY for c in others) - _snap(manifest.nodeHeight + 60)
 
 
 PAR_EXEC = '''\
@@ -370,10 +381,7 @@ def set_preview(comp: COMP, report: Optional[list] = None) -> None:
 		preview.nodeX = _snap(max(o.nodeX + o.nodeWidth for o in outs) + GRID)
 		preview.nodeY = max(o.nodeY for o in outs)
 	# bind now: the DAT Executes were created this frame and miss the tables' first change
-	callbacks = op.Matx.op('core/td_eval_callbacks').module
-	callbacks.apply_samplers(preview.op('samplers'), preview.op('glsl_mat'))
-	callbacks.apply_uniforms(preview.op('uniforms'), preview.op('glsl_mat'))
-	callbacks.apply_attribs(preview.op('attribs'), preview.op('glsl_mat'))
+	bind_evaluate(preview)
 	comp.par.opviewer = './preview/' + geo.name
 	comp.viewer = True
 
@@ -462,10 +470,7 @@ def ensure_evaluate_contents(comp: COMP, report: list, material_out: bool = True
 		ex.par.tablechange = True
 		ex.text = text
 		execs.append(ex)
-	callbacks = op.Matx.op('core/td_eval_callbacks').module
-	callbacks.apply_samplers(samplers, mat)
-	callbacks.apply_uniforms(uniforms, mat)
-	callbacks.apply_attribs(attribs, mat)
+	bind_evaluate(comp)
 	out = None
 	if material_out:
 		out = _ensure_io(comp, outMAT, 'out1', 0, 'Material')
@@ -476,6 +481,7 @@ def ensure_evaluate_contents(comp: COMP, report: list, material_out: bool = True
 	for d in mat.docked:
 		d.nodeX = mat.nodeX + (mat.nodeWidth - d.nodeWidth) / 2
 		d.nodeY = mat.nodeY - d.nodeHeight - 30
+	_place_manifest(comp)
 	return comp
 
 
@@ -595,10 +601,7 @@ def ensure_fam(matx_comp: COMP, library: COMP, menu_info: dict, report: list) ->
 		wanted = dict(info, op_label=label, **({'op_group': group} if group else {}))
 		if wanted != info:
 			dat.text = json.dumps(wanted, indent=4)
-		manifest = dat.parent()   # TDFam drops it at a fixed spot: move it under the node's ops
-		others = [c for c in library.op(name).children if c != manifest]
-		manifest.nodeX = 0
-		manifest.nodeY = min(c.nodeY for c in others) - _snap(manifest.nodeHeight + 60) if others else 0
+		_place_manifest(library.op(name))
 	deploy()
 	reinstall_fam(fam, library, report)
 	return fam
@@ -624,14 +627,30 @@ def ensure_fam_callbacks(matx_comp: COMP, report: list) -> DAT:
 
 def reinstall_fam(fam: COMP, library: COMP, report: list) -> None:
 	"""Turns fam's Install toggle off, then on, when a library node (a new one, say) is not in the
-	family colour: installing is what gives TDFam's masters their colour. Both flips are deferred
-	a few frames, and a frame apart, so that the manifest deploy has settled and each one reaches
-	TDFam's Parameter Execute callback (flipped during a build, the reinstall left nodes grey)."""
+	family colour: installing is what gives TDFam's masters their colour. The flips are deferred
+	a few frames so that the manifest deploy has settled, and the second is scheduled by the first
+	(see uninstall_then_install) so that they land in different frames even when the build made
+	TD drop frames: flipped in one frame, TDFam's Parameter Execute sees no change."""
 	color = tuple(round(c, 3) for c in fam.parGroup.Color.eval()[:3])
 	stale = [c.name for c in library.children
 	         if c.isCOMP and tuple(round(x, 3) for x in c.color) != color]
 	if not stale or not fam.par.Install.eval():
 		return
-	run('args[0].par.Install = False', fam, delayFrames=5)
-	run('args[0].par.Install = True', fam, delayFrames=10)
+	run("op.Matx.op('core/td_builder').module.uninstall_then_install(args[0])", fam, delayFrames=5)
 	report.append('reinstalling %s for the family colour of %s' % (fam.path, ', '.join(stale)))
+
+
+def uninstall_then_install(fam: COMP) -> None:
+	"""Turns fam's Install toggle off now and back on two frames later."""
+	fam.par.Install = False
+	run('args[0].par.Install = True', fam, delayFrames=2)
+
+
+def bind_evaluate(comp: COMP) -> None:
+	"""Applies an EvaluateShader COMP's binding tables to its glsl_mat now. Its DAT Executes do
+	this whenever a table changes, except for a change in the frame the COMP was created."""
+	callbacks = op.Matx.op('core/td_eval_callbacks').module
+	mat = comp.op('glsl_mat')
+	callbacks.apply_samplers(comp.op('samplers'), mat)
+	callbacks.apply_uniforms(comp.op('uniforms'), mat)
+	callbacks.apply_attribs(comp.op('attribs'), mat)

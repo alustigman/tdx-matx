@@ -258,6 +258,30 @@ class Codegen(unittest.TestCase):
 				r = codegen.generate({'version': 1, 'nodes': nodes, 'output': ['n1', out]}, SNIPS, LIB)
 				self.assertIn('matx_%s(' % t, r['pixel'], t)
 
+	def test_unconnected_closure_is_empty(self):
+		g = {'version': 1, 'output': ['n1', 'shader'], 'nodes': {
+			'n_em': {'type': 'EmissionShader', 'inputs': {}},
+			'n1': {'type': 'MixShader', 'inputs': {'shader_a': ['n_em', 'bsdf']}}}}
+		p = codegen.generate(g, SNIPS, LIB)['pixel']
+		self.assertIn('matx_MixShader(0.5, n_em_bsdf, MatxClosure(vec3(0.0), 0.0), n1_shader);', p)
+
+	def test_lib_requires_are_included_once_in_order(self):
+		g = {'version': 1, 'output': ['n1', 'shader'], 'nodes': {
+			'n_a': {'type': 'DiffuseBSDF', 'inputs': {}}, 'n_b': {'type': 'GlossyBSDF', 'inputs': {}},
+			'n1': {'type': 'AddShader', 'inputs': {'shader_a': ['n_a', 'bsdf'], 'shader_b': ['n_b', 'bsdf']}}}}
+		r = codegen.generate(g, SNIPS, LIB)
+		p = r['pixel']
+		self.assertEqual(p.count('vec3 matx_view_vector()'), 1)
+		self.assertEqual(p.count('vec3 matx_pbr_lighting('), 1)
+		self.assertLess(p.index('vec3 matx_view_vector()'), p.index('vec3 matx_pbr_lighting('))   # lighting requires view
+		self.assertLess(p.index('vec3 matx_pbr_lighting('), p.index('void matx_DiffuseBSDF('))
+		self.assertIn('world_normal', r['attributes'])   # the unconnected normal reads the attribute
+
+	def test_driven_uniform(self):
+		spec = matx.spec_from_snippet(SNIPS['Time'])
+		self.assertEqual((spec['uniforms'], spec['driven']), (['time'], ['time']))
+		self.assertEqual(matx.spec_from_snippet(SNIPS['Value'])['driven'], [])
+
 	def test_menu_recorded_on_node(self):
 		spec = matx.spec_from_snippet(SNIPS['Math'])
 		self.assertNotIn('operation', spec['inputs'])
