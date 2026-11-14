@@ -185,7 +185,9 @@ class Codegen(unittest.TestCase):
 		self.assertEqual(p.count('const int MATX_MATH_OPERATION_ADD'), 1)
 		with self.assertRaisesRegex(codegen.MatxError, 'not a operation option'):
 			codegen.generate(self._math_graph({'operation': 'bogus'}), SNIPS, LIB)
-		self.assertNotIn('const int', codegen.generate(example(), SNIPS, LIB)['pixel'])
+		g = example()   # the constants are only declared for the node types in use
+		g['output'] = ['n_a', 'color_out']
+		self.assertNotIn('const int', codegen.generate(g, SNIPS, LIB)['pixel'])
 
 	def test_vector_nodes(self):
 		g = {'version': 1, 'output': ['n_vm', 'vector'], 'nodes': {
