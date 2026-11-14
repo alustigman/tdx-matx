@@ -1,9 +1,9 @@
 // @type VectorMath
 // @category Converter
 // @menu operation add subtract multiply divide multiply_add cross_product project reflect refract faceforward dot_product distance length scale normalize absolute minimum maximum floor ceil fraction modulo wrap snap sine cosine tangent
-// @in vec3 vector_a = 0
-// @in vec3 vector_b = 0
-// @in vec3 vector_c = 0
+// @in vec3 vector_a = 0 [-1 1]
+// @in vec3 vector_b = 0 [-1 1]
+// @in vec3 vector_c = 0 [-1 1]
 // @in float scale = 1
 // @out vec3 vector
 // @out float value

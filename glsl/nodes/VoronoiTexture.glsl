@@ -7,7 +7,7 @@
 // @in float w = 0.0
 // @in float scale = 5.0
 // @in float smoothness = 1.0
-// @in float exponent = 0.5
+// @in float exponent = 0.5 [0 4]
 // @in float randomness = 1.0
 // @out float distance
 // @out vec3 color

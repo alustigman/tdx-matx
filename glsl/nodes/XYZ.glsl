@@ -1,6 +1,6 @@
 // @type XYZ
 // @category Input
-// @in vec3 vector = 0
+// @in vec3 vector = 0 [-1 1]
 // @uniform vector
 // @out vec3 vector_out
 // A constant vector. Its socket name makes it an XYZ parameter, and as a uniform it goes on the

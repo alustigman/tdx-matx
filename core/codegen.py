@@ -9,6 +9,7 @@ Snippet files (glsl/nodes/*.glsl) start with a header of `// @key value` lines:
     // @category Texture         (the node's group in the MATX family's OP Create menu)
     // @in    vec3 vector = 0.0
     // @in    float scale = 5.0
+    // @in    float angle = 0.0 [-180 180]   (optional slider range of the node's parameter)
     // @in    vec3 coord = uv    (a default naming an ATTRIBUTE reads it when unconnected)
     // @out   float fac
     // @attr  uv                 (vertex attribute the snippet reads, see ATTRIBUTES)
@@ -66,7 +67,8 @@ SAMPLER_TYPES = ('sampler2D',)
 MAT_ATTRIB_TYPE = {'float': 'float', 'vec2': 'float2', 'vec3': 'float3', 'vec4': 'float4'}
 ATTRIB_FLAVORS = ('texcoord', 'typed')
 # a vec3/vec4 socket whose name contains one of these is a vector, otherwise a colour
-SPATIAL_WORDS = ('vector', 'normal', 'pos', 'uv', 'coord', 'offset', 'dir', 'tangent', 'scale')
+SPATIAL_WORDS = ('vector', 'normal', 'pos', 'uv', 'coord', 'offset', 'dir', 'tangent', 'scale',
+                 'location', 'rotation', 'axis', 'center')
 
 
 class MatxError(Exception):
@@ -131,10 +133,10 @@ def _parse_default(type_, text):
 def parse_snippet(text):
 	"""Returns dict(type, samplers=[(type,name)], menus=[(name,[items])], ins=[(type,name,default)],
 	outs=[(type,name)], attrs, requires, uniforms, driven={uniform: expression},
-	attribs=[(type,name,default attribute,flavor)], category, body). A default is a float, a list
+	attribs=[(type,name,default attribute,flavor)], ranges={input: (low, high)}, category, body). A default is a float, a list
 	of floats, an attribute name or None."""
 	snip = {'type': None, 'samplers': [], 'ins': [], 'outs': [], 'attrs': [], 'requires': [],
-	        'uniforms': [], 'driven': {}, 'menus': [], 'attribs': [], 'category': None}
+	        'uniforms': [], 'driven': {}, 'menus': [], 'attribs': [], 'ranges': {}, 'category': None}
 	body = []
 	for line in text.splitlines():
 		m = re.match(r'\s*//\s*@(\w+)\s*(.*?)\s*$', line)
@@ -147,11 +149,16 @@ def parse_snippet(text):
 		elif key == 'category':
 			snip['category'] = rest or None
 		elif key == 'in':
-			m2 = re.match(r'(\w+)\s+(\w+)(?:\s*=\s*(.+))?$', rest)
+			m2 = re.match(r'(\w+)\s+(\w+)(?:\s*=\s*([^\[]+?))?(?:\s*\[\s*(\S+)\s+(\S+)\s*\])?$', rest)
 			if not m2 or m2.group(1) not in TYPES:
 				raise MatxError('bad @in line: %r' % line)
-			t, name, d = m2.groups()
+			t, name, d, low, high = m2.groups()
 			snip['ins'].append((t, name, _parse_default(t, d) if d else None))
+			if low is not None:
+				try:
+					snip['ranges'][name] = (float(low), float(high))
+				except ValueError:
+					raise MatxError('bad @in range: %r' % line)
 		elif key == 'out':
 			m2 = re.match(r'(\w+)\s+(\w+)$', rest)
 			if not m2 or m2.group(1) not in TYPES:

@@ -174,11 +174,11 @@ class Codegen(unittest.TestCase):
 
 	def test_menu_is_a_constant_argument(self):
 		self.assertEqual(SNIPS['Math']['menus'][0][1][:3], ['add', 'subtract', 'multiply'])
-		self.assertEqual([n for (_, n, _) in SNIPS['Math']['ins']], ['a', 'b'])   # no socket for the menu
+		self.assertEqual([n for (_, n, _) in SNIPS['Math']['ins']], ['a', 'b', 'c'])   # no socket for the menu
 		p = codegen.generate(self._math_graph({'operation': 'power'}), SNIPS, LIB)['pixel']
 		self.assertIn('const int MATX_MATH_OPERATION_ADD = 0;', p)
 		self.assertIn('const int MATX_MATH_OPERATION_POWER = 4;', p)
-		self.assertIn('matx_Math(MATX_MATH_OPERATION_POWER, 0.25, 2.0, n_m_value);', p)
+		self.assertIn('matx_Math(MATX_MATH_OPERATION_POWER, 0.25, 2.0, 0.5, n_m_value);', p)
 		self.assertLess(p.index('MATX_MATH_OPERATION_ADD = 0'), p.index('void matx_Math('))
 		p = codegen.generate(self._math_graph(), SNIPS, LIB)['pixel']   # unset: first item
 		self.assertIn('matx_Math(MATX_MATH_OPERATION_ADD, ', p)
@@ -307,6 +307,12 @@ class Codegen(unittest.TestCase):
 		                          '// @menu dims 3d 2d\nvoid matx_X() {}')
 		self.assertEqual((s['uniforms'], s['driven']), (['t'], {'t': 'absTime.seconds'}))
 		self.assertEqual(s['menus'], [('dims', ['3d', '2d'])])   # an item may start with a digit
+		s = codegen.parse_snippet('// @type X\n// @in vec3 axis = 0 0 1 [-1 1]\n// @in float a [0 10]\n'
+		                          '// @in vec3 v = uv\nvoid matx_X() {}')
+		self.assertEqual(s['ins'], [('vec3', 'axis', [0.0, 0.0, 1.0]), ('float', 'a', None), ('vec3', 'v', 'uv')])
+		self.assertEqual(s['ranges'], {'axis': (-1.0, 1.0), 'a': (0.0, 10.0)})   # slider range of the parameter
+		with self.assertRaisesRegex(codegen.MatxError, 'range'):
+			codegen.parse_snippet('// @type X\n// @in float a = 0 [lo hi]\nvoid matx_X() {}')
 		with self.assertRaisesRegex(codegen.MatxError, 'neither'):
 			codegen.parse_snippet('// @type X\n// @in vec3 v = bogus\nvoid matx_X() {}')
 

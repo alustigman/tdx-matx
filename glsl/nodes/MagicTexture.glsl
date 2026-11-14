@@ -2,8 +2,8 @@
 // @category Texture
 // @in vec3 vector = uv
 // @in float scale = 5.0
-// @in float distortion = 1.0
-// @in float depth = 2.0
+// @in float distortion = 1.0 [0 4]
+// @in float depth = 2.0 [0 10]
 // @out vec3 color
 // @out float fac
 // Blender's Magic Texture: psychedelic colour bands made of nested sines. depth (0 to 10, a

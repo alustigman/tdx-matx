@@ -1,6 +1,6 @@
 // @type Fresnel
 // @category Input
-// @in float ior = 1.5
+// @in float ior = 1.5 [1 3]
 // @in vec3 normal = world_normal
 // @out float fac
 // @requires view

@@ -6,11 +6,11 @@
 // @menu profile sine saw triangle
 // @in vec3 vector = uv
 // @in float scale = 5.0
-// @in float distortion = 0.0
-// @in float detail = 2.0
+// @in float distortion = 0.0 [0 10]
+// @in float detail = 2.0 [0 15]
 // @in float detail_scale = 1.0
 // @in float detail_roughness = 0.5
-// @in float phase_offset = 0.0
+// @in float phase_offset = 0.0 [0 6.2832]
 // @out vec3 color
 // @out float fac
 // @requires fbm

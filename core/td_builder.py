@@ -293,7 +293,8 @@ def ensure_node_contents(comp: COMP, snip: dict, report: list) -> COMP:
 			help_ += (' Always a uniform on the GLSL MAT: the expression (%s by default) animates '
 			          'it without recompiling the shader.' % snip['driven'][name])
 		pars = _ensure_par(comp, inputs_page, matx.par_name(name), _par_style(ty, name), report, label,
-		                   help_, default=default, norm=_norm_range(default), expr=snip['driven'].get(name))
+		                   help_, default=default, norm=snip['ranges'].get(name) or _norm_range(default),
+		                   expr=snip['driven'].get(name))
 		# greyed out while a wire feeds the socket (in_<name> is connector i)
 		enable = 'len(me.inputConnectors[%d].connections) == 0' % i
 		for p in pars:

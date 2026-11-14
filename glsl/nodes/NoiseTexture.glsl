@@ -6,12 +6,12 @@
 // @in vec3 vector = uv
 // @in float w = 0.0
 // @in float scale = 5.0
-// @in float detail = 2.0
+// @in float detail = 2.0 [0 15]
 // @in float roughness = 0.5
-// @in float lacunarity = 2.0
-// @in float offset = 0.0
-// @in float gain = 1.0
-// @in float distortion = 0.0
+// @in float lacunarity = 2.0 [0 4]
+// @in float offset = 0.0 [-1 1]
+// @in float gain = 1.0 [0 4]
+// @in float distortion = 0.0 [0 4]
 // @out float fac
 // @out vec3 color
 // Blender's Noise Texture on TouchDesigner's Perlin noise. dimensions picks what is sampled: 1D

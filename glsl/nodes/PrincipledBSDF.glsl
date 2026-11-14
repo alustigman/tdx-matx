@@ -9,7 +9,7 @@
 // @in float ambient_occlusion = 1.0
 // @in float shadow_strength = 1.0
 // @in vec3 shadow_color = 0.0
-// @in float emission_strength = 1.0
+// @in float emission_strength = 1.0 [0 10]
 // @in vec3 normal = world_normal
 // @out closure bsdf
 // @attr color

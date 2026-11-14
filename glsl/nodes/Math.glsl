@@ -1,13 +1,24 @@
 // @type Math
 // @category Converter
-// @menu operation add subtract multiply divide power logarithm sqrt inverse_sqrt absolute exponent minimum maximum less_than greater_than sign round floor ceil truncate fraction modulo snap sine cosine tangent arcsine arccosine arctangent arctan2 radians degrees
+// @menu operation add subtract multiply divide power logarithm sqrt inverse_sqrt absolute exponent minimum maximum less_than greater_than sign round floor ceil truncate fraction modulo snap sine cosine tangent arcsine arccosine arctangent arctan2 radians degrees multiply_add compare smooth_minimum smooth_maximum floored_modulo wrap pingpong hyperbolic_sine hyperbolic_cosine hyperbolic_tangent
 // @in float a = 0.5
 // @in float b = 0.5
+// @in float c = 0.5
 // @out float value
-// Blender's Math node: operations that can fail (divide, logarithm, power, sqrt, modulo, snap)
-// return 0.0 instead of NaN or infinity, as Blender's safe_* variants do. `b` is unused by the
-// one-operand operations.
-void matx_Math(int operation, float a, float b, out float value)
+// Blender's Math node: operations that can fail (divide, logarithm, power, sqrt, modulo, snap,
+// wrap, pingpong) return 0.0 instead of NaN or infinity, as Blender's safe_* variants do. `b` is
+// unused by the one-operand operations; `c` is read by multiply_add (a * b + c), compare (1 when
+// a and b differ by at most c), smooth_minimum and smooth_maximum (the smoothing distance) and
+// wrap (a wrapped into c..b).
+float matx_math_smooth_min(float a, float b, float c)
+{
+	if (c == 0.0)
+		return min(a, b);
+	float h = max(c - abs(a - b), 0.0) / c;
+	return min(a, b) - h * h * h * c * (1.0 / 6.0);
+}
+
+void matx_Math(int operation, float a, float b, float c, out float value)
 {
 	switch (operation)
 	{
@@ -51,6 +62,17 @@ void matx_Math(int operation, float a, float b, out float value)
 		case MATX_MATH_OPERATION_ARCTAN2:      value = atan(a, b); break;
 		case MATX_MATH_OPERATION_RADIANS:      value = radians(a); break;
 		case MATX_MATH_OPERATION_DEGREES:      value = degrees(a); break;
+		case MATX_MATH_OPERATION_MULTIPLY_ADD: value = a * b + c; break;
+		case MATX_MATH_OPERATION_COMPARE:      value = abs(a - b) <= max(c, 0.00001) ? 1.0 : 0.0; break;
+		case MATX_MATH_OPERATION_SMOOTH_MINIMUM: value = matx_math_smooth_min(a, b, c); break;
+		case MATX_MATH_OPERATION_SMOOTH_MAXIMUM: value = -matx_math_smooth_min(-a, -b, c); break;
+		// the result takes b's sign
+		case MATX_MATH_OPERATION_FLOORED_MODULO: value = b != 0.0 ? a - floor(a / b) * b : 0.0; break;
+		case MATX_MATH_OPERATION_WRAP:         value = b != c ? a - (b - c) * floor((a - c) / (b - c)) : c; break;
+		case MATX_MATH_OPERATION_PINGPONG:     value = b != 0.0 ? abs(fract((a - b) / (b * 2.0)) * b * 2.0 - b) : 0.0; break;
+		case MATX_MATH_OPERATION_HYPERBOLIC_SINE:    value = sinh(a); break;
+		case MATX_MATH_OPERATION_HYPERBOLIC_COSINE:  value = cosh(a); break;
+		case MATX_MATH_OPERATION_HYPERBOLIC_TANGENT: value = tanh(a); break;
 		default:                               value = 0.0; break;
 	}
 }
