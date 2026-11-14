@@ -258,9 +258,14 @@ def ensure_node_contents(comp: COMP, snip: dict, report: list) -> COMP:
 		ins.append(_ensure_io(comp, inDAT, 'in_' + name, i, label))
 		if ty == 'closure' or isinstance(default, str):   # closures and attribute defaults: connector only
 			continue
-		_ensure_par(comp, inputs_page, matx.par_name(name), _par_style(ty, name), report, label,
-		            '%s (%s) used when the %s input is not connected.' % (label, ty, label),
-		            default=default, norm=_norm_range(default))
+		pars = _ensure_par(comp, inputs_page, matx.par_name(name), _par_style(ty, name), report, label,
+		                   '%s (%s) used when the %s input is not connected.' % (label, ty, label),
+		                   default=default, norm=_norm_range(default))
+		# greyed out while a wire feeds the socket (in_<name> is connector i)
+		enable = 'len(me.inputConnectors[%d].connections) == 0' % i
+		for p in pars:
+			if p.enableExpr != enable:
+				p.enableExpr = enable
 	_remove_stale(comp, 'in_', {o.name for o in ins}, report)
 
 	sockets = [name for (_, name) in snip['outs']] or [None]
@@ -399,6 +404,9 @@ def ensure_evaluate_contents(comp: COMP, report: list, material_out: bool = True
 		for d in list(mat.docked):   # keep only the info DAT; the shaders come from vertex/pixel
 			if d.type != 'info':
 				d.destroy()
+		# compile in a background thread, showing the previous shader meanwhile, so editing the
+		# graph does not stall the frame; set once, so a user's own choice is kept
+		mat.par.compilebehavior = 'threadedprevious'
 	mat.par.vdat = 'vertex'
 	mat.par.pdat = 'pixel'
 	execs = []
