@@ -17,7 +17,7 @@ def onCook(scriptOp: scriptDAT) -> None:
 	snippet = op.Matx.op('snippets').op(node_type)
 	if snippet is None:
 		raise ValueError('no snippet DAT for node type %r' % node_type)
-	spec = matx.spec_from_snippet(codegen.parse_snippet(snippet.text))
+	spec = matx.spec_from_snippet(codegen.parse_snippet_cached(snippet.text))
 	name = scriptOp.name
 	out_socket = name[len('graph_'):] if name.startswith('graph_') else None
 	matx.build_node(scriptOp, spec, out_socket)

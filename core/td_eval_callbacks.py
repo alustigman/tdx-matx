@@ -29,7 +29,7 @@ def load_library(snippets_comp: COMP) -> tuple:
 		if d.name.startswith('lib_'):
 			lib[d.name[4:]] = d.text
 		else:
-			s = codegen.parse_snippet(d.text)
+			s = codegen.parse_snippet_cached(d.text)
 			snippets[s['type']] = s
 	return snippets, lib
 

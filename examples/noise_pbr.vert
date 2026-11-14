@@ -23,7 +23,7 @@ void main()
 	oVert.color = TDInstanceColor(TDColor());
 	oVert.worldSpacePos = worldSpacePos.xyz;
 	oVert.worldSpaceNorm = normalize(TDDeformNorm(normal));
-	oVert.uv = TDInstanceTexCoord(TDTexCoord(0u));
+	oVert.uv = TDInstanceTexCoord(TDTexAttrib_Tex(0u));
 	oVert.cameraIndex = TDCameraIndex();
 
 #else // TD_PICKING_ACTIVE

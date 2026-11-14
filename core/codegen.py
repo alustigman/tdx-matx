@@ -222,6 +222,20 @@ def parse_snippet(text):
 	return snip
 
 
+_PARSED = {}   # snippet text -> parse_snippet result
+
+
+def parse_snippet_cached(text):
+	"""parse_snippet, remembered per text: the hosts parse every snippet on each cook. The result
+	is shared, so callers must not modify it."""
+	snip = _PARSED.get(text)
+	if snip is None:
+		if len(_PARSED) > 1024:   # edited snippets leave their old texts behind
+			_PARSED.clear()
+		snip = _PARSED[text] = parse_snippet(text)
+	return snip
+
+
 def load_snippets(nodes_dir, lib_dir):
 	"""Reads glsl/nodes/*.glsl and glsl/lib/*.glsl from disk."""
 	import os

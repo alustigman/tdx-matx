@@ -18,63 +18,52 @@ struct MatxClosure {
 	float alpha;
 };
 
-void matx_TexCoord(out vec3 uv)
+// View helpers shared by the nodes that depend on the camera.
+
+// Unit vector from the shaded point to the camera, in world space.
+vec3 matx_view_vector()
 {
-	uv = iVert.uv;
+	return normalize(uTDMats[iVert.cameraIndex].camInverse[3].xyz - iVert.worldSpacePos.xyz);
 }
 
-void matx_NoiseTexture(vec3 vector, float scale, out float fac, out vec3 color)
+// The shading normal: unit length, and flipped on back faces so it faces the camera side.
+vec3 matx_shading_normal(vec3 normal)
 {
-	fac = TDPerlinNoise(vector * scale) * 0.5 + 0.5;
-	color = vec3(fac);
+	normal = normalize(normal);
+	return TDFrontFacing(iVert.worldSpacePos.xyz, normal) ? normal : -normal;
 }
 
-void matx_RGB(vec3 color, out vec3 color_out)
+// Fresnel reflectance of a dielectric for the cosine of the incidence angle (Blender's
+// fresnel_dielectric_cos).
+float matx_fresnel_dielectric(float cosi, float eta)
 {
-	color_out = color;
+	float c = abs(cosi);
+	float g = eta * eta - 1.0 + c * c;
+	if (g <= 0.0)
+		return 1.0;   // total internal reflection
+	g = sqrt(g);
+	float a = (g - c) / (g + c);
+	float b = (c * (g + c) - 1.0) / (c * (g - c) + 1.0);
+	return 0.5 * a * a * (1.0 + b * b);
 }
 
-void matx_MixColor(float fac, vec3 a, vec3 b, out vec3 result)
-{
-	result = mix(a, b, clamp(fac, 0.0, 1.0));
-}
-
-void matx_PrincipledBSDF(vec3 base_color, float metallic, float roughness, float specular_level,
-                         vec3 emission, float alpha, float ambient_occlusion,
-                         float shadow_strength, vec3 shadow_color, out MatxClosure bsdf)
+// @requires view
+// TouchDesigner's PBR lighting summed over every Light COMP and Environment Light COMP of the
+// render. `normal` is a world-space normal (any length); roughness 0 is not allowed by TD.
+vec3 matx_pbr_lighting(vec3 diffuseColor, vec3 specularColor, vec3 normal, float roughness,
+                       float ambientOcclusion, float shadowStrength, vec3 shadowColor)
 {
 	vec3 diffuseSum = vec3(0.0);
 	vec3 specularSum = vec3(0.0);
-
-	vec3 worldSpaceNorm = normalize(iVert.worldSpaceNorm.xyz);
-	vec3 normal = worldSpaceNorm;
-	vec3 viewVec = normalize(uTDMats[iVert.cameraIndex].camInverse[3].xyz - iVert.worldSpacePos.xyz);
-
-	vec4 vertColor = TDPixelColor(iVert.color);
-
-	// 0.08 is the value for dielectric specular that
-	// Substance Designer uses for its top end.
-	float specLevel = 0.08 * specular_level;
-
-	vec4 finalBaseColor = vec4(base_color * alpha, alpha) * vertColor;
-
-	// A roughness of exactly 0 is not allowed
+	vec3 viewVec = matx_view_vector();
+	normal = matx_shading_normal(normal);
 	roughness = max(roughness, 0.0001);
-
-	vec3 pbrDiffuseColor = finalBaseColor.rgb * (1.0 - metallic);
-	vec3 pbrSpecularColor = mix(vec3(specLevel), finalBaseColor.rgb, metallic);
-
-	// Flip the normals on backfaces
-	if (!TDFrontFacing(iVert.worldSpacePos.xyz, worldSpaceNorm.xyz))
-	{
-		normal = -normal;
-	}
 
 	for (int i = 0; i < TD_NUM_LIGHTS; i++)
 	{
 		TDPBRResult res;
-		res = TDLightingPBR(i, pbrDiffuseColor, pbrSpecularColor, iVert.worldSpacePos.xyz,
-		                    normal, shadow_strength, shadow_color, viewVec, roughness);
+		res = TDLightingPBR(i, diffuseColor, specularColor, iVert.worldSpacePos.xyz,
+		                    normal, shadowStrength, shadowColor, viewVec, roughness);
 		diffuseSum += res.diffuse;
 		specularSum += res.specular;
 	}
@@ -83,13 +72,319 @@ void matx_PrincipledBSDF(vec3 base_color, float metallic, float roughness, float
 	for (int i = 0; i < TD_NUM_ENV_LIGHTS; i++)
 	{
 		TDPBRResult res;
-		res = TDEnvLightingPBR(i, pbrDiffuseColor, pbrSpecularColor, normal, viewVec,
-		                       roughness, ambient_occlusion);
+		res = TDEnvLightingPBR(i, diffuseColor, specularColor, normal, viewVec,
+		                       roughness, ambientOcclusion);
 		diffuseSum += res.diffuse;
 		specularSum += res.specular;
 	}
+	return diffuseSum + specularSum;
+}
 
-	bsdf.radiance = diffuseSum + specularSum + emission;
+// Texture coordinates. `uv` is the geometry attribute named on the node (Tex by default: the
+// POP texture attribute, and texture layer 0 of a SOP). `window` is the pixel's position in the
+// render, 0-1 from the bottom left.
+void matx_TexCoord(vec3 value, out vec3 uv, out vec3 window)
+{
+	uv = value;
+	window = vec3((gl_FragCoord.xy - uTDGeneral.viewport.xy) * uTDGeneral.viewport.zw, 0.0);
+}
+
+const int MATX_NOISETEXTURE_DIMENSIONS_3D = 0;
+const int MATX_NOISETEXTURE_DIMENSIONS_1D = 1;
+const int MATX_NOISETEXTURE_DIMENSIONS_2D = 2;
+const int MATX_NOISETEXTURE_DIMENSIONS_4D = 3;
+const int MATX_NOISETEXTURE_TYPE_FBM = 0;
+const int MATX_NOISETEXTURE_TYPE_MULTIFRACTAL = 1;
+const int MATX_NOISETEXTURE_TYPE_HYBRID_MULTIFRACTAL = 2;
+const int MATX_NOISETEXTURE_TYPE_RIDGED_MULTIFRACTAL = 3;
+const int MATX_NOISETEXTURE_TYPE_HETERO_TERRAIN = 4;
+const int MATX_NOISETEXTURE_NORMALIZE_ON = 0;
+const int MATX_NOISETEXTURE_NORMALIZE_OFF = 1;
+
+// Blender's Noise Texture on TouchDesigner's Perlin noise. dimensions picks what is sampled: 1D
+// is w alone, 2D vector.xy, 3D vector, 4D vector and w (animate w to evolve the pattern in
+// place). detail adds octaves (up to 15), roughness and lacunarity are their amplitude and
+// frequency ratios, distortion warps the coordinates. normalize remaps fBM to 0-1 (off: signed,
+// around 0); the other types are not normalized, and offset and gain only apply to them.
+float matx_noise_signed(int dimensions, vec4 p)
+{
+	switch (dimensions)
+	{
+		case MATX_NOISETEXTURE_DIMENSIONS_1D: return TDPerlinNoise(vec2(p.w, 0.0));
+		case MATX_NOISETEXTURE_DIMENSIONS_2D: return TDPerlinNoise(p.xy);
+		case MATX_NOISETEXTURE_DIMENSIONS_4D: return TDPerlinNoise(p);
+		default:                              return TDPerlinNoise(p.xyz);
+	}
+}
+
+float matx_noise_fractal(int dimensions, int type, int normalize_mode, vec4 p, float detail,
+                         float roughness, float lacunarity, float offset, float gain)
+{
+	detail = clamp(detail, 0.0, 15.0);
+	roughness = max(roughness, 0.0);
+	int octaves = int(detail);
+	float rmd = detail - float(octaves);
+	switch (type)
+	{
+		case MATX_NOISETEXTURE_TYPE_MULTIFRACTAL:
+		{
+			float value = 1.0;
+			float pwr = 1.0;
+			for (int i = 0; i <= octaves; i++)
+			{
+				value *= pwr * matx_noise_signed(dimensions, p) + 1.0;
+				pwr *= roughness;
+				p *= lacunarity;
+			}
+			if (rmd != 0.0)
+				value *= rmd * pwr * matx_noise_signed(dimensions, p) + 1.0;
+			return value;
+		}
+		case MATX_NOISETEXTURE_TYPE_HYBRID_MULTIFRACTAL:
+		{
+			float pwr = 1.0;
+			float value = 0.0;
+			float weight = 1.0;
+			for (int i = 0; weight > 0.001 && i <= octaves; i++)
+			{
+				weight = min(weight, 1.0);
+				float signal = (matx_noise_signed(dimensions, p) + offset) * pwr;
+				pwr *= roughness;
+				value += weight * signal;
+				weight *= gain * signal;
+				p *= lacunarity;
+			}
+			if (rmd != 0.0 && weight > 0.001)
+			{
+				weight = min(weight, 1.0);
+				value += rmd * weight * (matx_noise_signed(dimensions, p) + offset) * pwr;
+			}
+			return value;
+		}
+		case MATX_NOISETEXTURE_TYPE_RIDGED_MULTIFRACTAL:
+		{
+			float pwr = roughness;
+			float signal = offset - abs(matx_noise_signed(dimensions, p));
+			signal *= signal;
+			float value = signal;
+			for (int i = 1; i <= octaves; i++)
+			{
+				p *= lacunarity;
+				float weight = clamp(signal * gain, 0.0, 1.0);
+				signal = offset - abs(matx_noise_signed(dimensions, p));
+				signal *= signal;
+				signal *= weight;
+				value += signal * pwr;
+				pwr *= roughness;
+			}
+			return value;
+		}
+		case MATX_NOISETEXTURE_TYPE_HETERO_TERRAIN:
+		{
+			float pwr = roughness;
+			float value = offset + matx_noise_signed(dimensions, p);
+			p *= lacunarity;
+			for (int i = 1; i <= octaves; i++)
+			{
+				value += (matx_noise_signed(dimensions, p) + offset) * pwr * value;
+				pwr *= roughness;
+				p *= lacunarity;
+			}
+			if (rmd != 0.0)
+				value += rmd * (matx_noise_signed(dimensions, p) + offset) * pwr * value;
+			return value;
+		}
+		default:   // fBM
+		{
+			float fscale = 1.0;
+			float amp = 1.0;
+			float maxamp = 0.0;
+			float sum = 0.0;
+			for (int i = 0; i <= octaves; i++)
+			{
+				sum += matx_noise_signed(dimensions, fscale * p) * amp;
+				maxamp += amp;
+				amp *= roughness;
+				fscale *= lacunarity;
+			}
+			bool norm = normalize_mode == MATX_NOISETEXTURE_NORMALIZE_ON;
+			float value = norm ? 0.5 * sum / maxamp + 0.5 : sum;
+			if (rmd != 0.0)
+			{
+				float sum2 = sum + matx_noise_signed(dimensions, fscale * p) * amp;
+				value = mix(value, norm ? 0.5 * sum2 / (maxamp + amp) + 0.5 : sum2, rmd);
+			}
+			return value;
+		}
+	}
+}
+
+void matx_NoiseTexture(int dimensions, int type, int normalize_mode, vec3 vector, float w, float scale,
+                       float detail, float roughness, float lacunarity, float offset, float gain,
+                       float distortion, out float fac, out vec3 color)
+{
+	vec4 p = vec4(vector, w) * scale;
+	if (distortion != 0.0)
+	{
+		// each component is pushed by its own noise (fixed offsets decorrelate them)
+		p += distortion * vec4(matx_noise_signed(dimensions, p + vec4(113.7, 151.3, 127.1, 139.9)),
+		                       matx_noise_signed(dimensions, p + vec4(171.9, 107.3, 163.3, 119.1)),
+		                       matx_noise_signed(dimensions, p + vec4(131.3, 181.1, 109.7, 157.3)),
+		                       matx_noise_signed(dimensions, p + vec4(149.9, 123.7, 173.1, 101.9)));
+	}
+	fac = matx_noise_fractal(dimensions, type, normalize_mode, p, detail, roughness, lacunarity, offset, gain);
+	color = vec3(fac,
+	             matx_noise_fractal(dimensions, type, normalize_mode, p + vec4(137.1, 193.7, 111.3, 167.9),
+	                                detail, roughness, lacunarity, offset, gain),
+	             matx_noise_fractal(dimensions, type, normalize_mode, p + vec4(179.3, 103.1, 191.9, 143.3),
+	                                detail, roughness, lacunarity, offset, gain));
+}
+
+void matx_RGB(vec3 color, out vec3 color_out)
+{
+	color_out = color;
+}
+
+const int MATX_MIXCOLOR_BLEND_TYPE_MIX = 0;
+const int MATX_MIXCOLOR_BLEND_TYPE_DARKEN = 1;
+const int MATX_MIXCOLOR_BLEND_TYPE_MULTIPLY = 2;
+const int MATX_MIXCOLOR_BLEND_TYPE_BURN = 3;
+const int MATX_MIXCOLOR_BLEND_TYPE_LIGHTEN = 4;
+const int MATX_MIXCOLOR_BLEND_TYPE_SCREEN = 5;
+const int MATX_MIXCOLOR_BLEND_TYPE_DODGE = 6;
+const int MATX_MIXCOLOR_BLEND_TYPE_ADD = 7;
+const int MATX_MIXCOLOR_BLEND_TYPE_OVERLAY = 8;
+const int MATX_MIXCOLOR_BLEND_TYPE_SOFT_LIGHT = 9;
+const int MATX_MIXCOLOR_BLEND_TYPE_LINEAR_LIGHT = 10;
+const int MATX_MIXCOLOR_BLEND_TYPE_DIFFERENCE = 11;
+const int MATX_MIXCOLOR_BLEND_TYPE_EXCLUSION = 12;
+const int MATX_MIXCOLOR_BLEND_TYPE_SUBTRACT = 13;
+const int MATX_MIXCOLOR_BLEND_TYPE_DIVIDE = 14;
+const int MATX_MIXCOLOR_BLEND_TYPE_HUE = 15;
+const int MATX_MIXCOLOR_BLEND_TYPE_SATURATION = 16;
+const int MATX_MIXCOLOR_BLEND_TYPE_COLOR = 17;
+const int MATX_MIXCOLOR_BLEND_TYPE_VALUE = 18;
+const int MATX_MIXCOLOR_CLAMP_RESULT_OFF = 0;
+const int MATX_MIXCOLOR_CLAMP_RESULT_ON = 1;
+
+// Blender's Mix Color: blends b over a with the chosen blend type, by fac (clamped to 0-1).
+// clamp_result limits the result to 0-1.
+void matx_MixColor(int blend_type, int clamp_result, float fac, vec3 a, vec3 b, out vec3 result)
+{
+	fac = clamp(fac, 0.0, 1.0);
+	float facm = 1.0 - fac;
+	switch (blend_type)
+	{
+		case MATX_MIXCOLOR_BLEND_TYPE_DARKEN:   result = mix(a, min(a, b), fac); break;
+		case MATX_MIXCOLOR_BLEND_TYPE_MULTIPLY: result = mix(a, a * b, fac); break;
+		case MATX_MIXCOLOR_BLEND_TYPE_BURN:
+			for (int i = 0; i < 3; i++)
+			{
+				float t = facm + fac * b[i];
+				result[i] = t <= 0.0 ? 0.0 : clamp(1.0 - (1.0 - a[i]) / t, 0.0, 1.0);
+			}
+			break;
+		case MATX_MIXCOLOR_BLEND_TYPE_LIGHTEN:  result = mix(a, max(a, b), fac); break;
+		case MATX_MIXCOLOR_BLEND_TYPE_SCREEN:   result = vec3(1.0) - (vec3(facm) + fac * (vec3(1.0) - b)) * (vec3(1.0) - a); break;
+		case MATX_MIXCOLOR_BLEND_TYPE_DODGE:
+			for (int i = 0; i < 3; i++)
+			{
+				float t = 1.0 - fac * b[i];
+				result[i] = a[i] == 0.0 ? 0.0 : (t <= 0.0 ? 1.0 : min(a[i] / t, 1.0));
+			}
+			break;
+		case MATX_MIXCOLOR_BLEND_TYPE_ADD:      result = mix(a, a + b, fac); break;
+		case MATX_MIXCOLOR_BLEND_TYPE_OVERLAY:
+			for (int i = 0; i < 3; i++)
+			{
+				result[i] = a[i] < 0.5 ? a[i] * (facm + 2.0 * fac * b[i])
+				                       : 1.0 - (facm + 2.0 * fac * (1.0 - b[i])) * (1.0 - a[i]);
+			}
+			break;
+		case MATX_MIXCOLOR_BLEND_TYPE_SOFT_LIGHT:
+		{
+			vec3 scr = vec3(1.0) - (vec3(1.0) - b) * (vec3(1.0) - a);
+			result = facm * a + fac * ((vec3(1.0) - a) * b * a + a * scr);
+			break;
+		}
+		case MATX_MIXCOLOR_BLEND_TYPE_LINEAR_LIGHT: result = a + fac * (2.0 * (b - vec3(0.5))); break;
+		case MATX_MIXCOLOR_BLEND_TYPE_DIFFERENCE:   result = mix(a, abs(a - b), fac); break;
+		case MATX_MIXCOLOR_BLEND_TYPE_EXCLUSION:    result = max(mix(a, a + b - 2.0 * a * b, fac), vec3(0.0)); break;
+		case MATX_MIXCOLOR_BLEND_TYPE_SUBTRACT:     result = mix(a, a - b, fac); break;
+		case MATX_MIXCOLOR_BLEND_TYPE_DIVIDE:
+			for (int i = 0; i < 3; i++)
+				result[i] = b[i] != 0.0 ? facm * a[i] + fac * a[i] / b[i] : a[i];
+			break;
+		case MATX_MIXCOLOR_BLEND_TYPE_HUE:
+		{
+			vec3 hsv2 = TDRGBToHSV(b);
+			result = a;
+			if (hsv2.y != 0.0)
+			{
+				vec3 hsv = TDRGBToHSV(a);
+				hsv.x = hsv2.x;
+				result = mix(a, TDHSVToRGB(hsv), fac);
+			}
+			break;
+		}
+		case MATX_MIXCOLOR_BLEND_TYPE_SATURATION:
+		{
+			vec3 hsv = TDRGBToHSV(a);
+			result = a;
+			if (hsv.y != 0.0)
+			{
+				hsv.y = facm * hsv.y + fac * TDRGBToHSV(b).y;
+				result = TDHSVToRGB(hsv);
+			}
+			break;
+		}
+		case MATX_MIXCOLOR_BLEND_TYPE_COLOR:
+		{
+			vec3 hsv2 = TDRGBToHSV(b);
+			result = a;
+			if (hsv2.y != 0.0)
+			{
+				vec3 hsv = TDRGBToHSV(a);
+				hsv.xy = hsv2.xy;
+				result = mix(a, TDHSVToRGB(hsv), fac);
+			}
+			break;
+		}
+		case MATX_MIXCOLOR_BLEND_TYPE_VALUE:
+		{
+			vec3 hsv = TDRGBToHSV(a);
+			hsv.z = facm * hsv.z + fac * TDRGBToHSV(b).z;
+			result = TDHSVToRGB(hsv);
+			break;
+		}
+		default: result = mix(a, b, fac); break;
+	}
+	if (clamp_result == MATX_MIXCOLOR_CLAMP_RESULT_ON)
+		result = clamp(result, 0.0, 1.0);
+}
+
+// TouchDesigner's PBR material as a shading node, following the PBR MAT's exported shader:
+// vertex colour multiplies the base colour, alpha is premultiplied. `normal` takes a Normal Map
+// or Bump node; unconnected it is the surface normal.
+void matx_PrincipledBSDF(vec3 base_color, float metallic, float roughness, float specular_level,
+                         vec3 emission, float alpha, float ambient_occlusion,
+                         float shadow_strength, vec3 shadow_color, float emission_strength,
+                         vec3 normal, out MatxClosure bsdf)
+{
+	vec4 vertColor = TDPixelColor(iVert.color);
+
+	// 0.08 is the value for dielectric specular that
+	// Substance Designer uses for its top end.
+	float specLevel = 0.08 * specular_level;
+
+	vec4 finalBaseColor = vec4(base_color * alpha, alpha) * vertColor;
+
+	vec3 pbrDiffuseColor = finalBaseColor.rgb * (1.0 - metallic);
+	vec3 pbrSpecularColor = mix(vec3(specLevel), finalBaseColor.rgb, metallic);
+
+	bsdf.radiance = matx_pbr_lighting(pbrDiffuseColor, pbrSpecularColor, normal, roughness,
+	                                  ambient_occlusion, shadow_strength, shadow_color)
+	                + emission * emission_strength;
 	bsdf.alpha = finalBaseColor.a;
 }
 
@@ -100,18 +395,19 @@ void main()
 	TDCheckDiscard();
 
 	vec3 n_uv_uv;
-	matx_TexCoord(n_uv_uv);
+	vec3 n_uv_window;
+	matx_TexCoord(iVert.uv, n_uv_uv, n_uv_window);
 	float n_noise_fac;
 	vec3 n_noise_color;
-	matx_NoiseTexture(n_uv_uv, 4.0, n_noise_fac, n_noise_color);
+	matx_NoiseTexture(MATX_NOISETEXTURE_DIMENSIONS_3D, MATX_NOISETEXTURE_TYPE_FBM, MATX_NOISETEXTURE_NORMALIZE_ON, n_uv_uv, 0.0, 4.0, 2.0, 0.5, 2.0, 0.0, 1.0, 0.0, n_noise_fac, n_noise_color);
 	vec3 n_a_color_out;
 	matx_RGB(vec3(0.05, 0.1, 0.4), n_a_color_out);
 	vec3 n_b_color_out;
 	matx_RGB(vec3(0.9, 0.6, 0.2), n_b_color_out);
 	vec3 n_mix_result;
-	matx_MixColor(n_noise_fac, n_a_color_out, n_b_color_out, n_mix_result);
+	matx_MixColor(MATX_MIXCOLOR_BLEND_TYPE_MIX, MATX_MIXCOLOR_CLAMP_RESULT_OFF, n_noise_fac, n_a_color_out, n_b_color_out, n_mix_result);
 	MatxClosure n_bsdf_bsdf;
-	matx_PrincipledBSDF(n_mix_result, 0.0, 0.35, 0.5, vec3(0.0, 0.0, 0.0), 1.0, 1.0, 1.0, vec3(0.0, 0.0, 0.0), n_bsdf_bsdf);
+	matx_PrincipledBSDF(n_mix_result, 0.0, 0.35, 0.5, vec3(0.0, 0.0, 0.0), 1.0, 1.0, 1.0, vec3(0.0, 0.0, 0.0), 1.0, iVert.worldSpaceNorm, n_bsdf_bsdf);
 
 	vec4 finalColor = vec4(n_bsdf_bsdf.radiance, n_bsdf_bsdf.alpha);
 
