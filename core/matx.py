@@ -13,7 +13,10 @@ tuplets, e.g. Basecolorr/g/b), plus one TOP parameter per sampler and one Menu p
 @menu (holding the item name), named the same way.
 A node whose snippet declares @uniform inputs also carries an `Asuniform` toggle: when on, those
 inputs are recorded as uniform references (COMP path, parameter name) instead of their values,
-so animating the parameter does not change the graph or recompile the shader.
+so animating the parameter does not change the graph or recompile the shader. A driven uniform
+(`@uniform time = <expression>`) is always recorded that way.
+Each @attrib has a Str parameter holding the geometry attribute's name, and a `<Name>type` Menu
+when the snippet lets the node choose the attribute's size (`typed`).
 """
 import json
 
@@ -62,11 +65,13 @@ def spec_from_snippet(snip):
 	        'outputs': {name: t for (t, name) in snip['outs']},
 	        'samplers': {name: t for (t, name) in snip['samplers']},
 	        'menus': {name: list(items) for (name, items) in snip.get('menus', [])},
-	        'uniforms': list(snip.get('uniforms', []))}
+	        'uniforms': list(snip.get('uniforms', [])),
+	        'driven': list(snip.get('driven', {})),
+	        'attribs': {name: (t, default, flavor) for (t, name, default, flavor) in snip.get('attribs', [])}}
 
 
 def make_node(spec, node_id, literals, upstream, out_socket=None, samplers=None, uniforms=None,
-              menus=None):
+              menus=None, attribs=None):
 	"""
 	spec:      {'type': str, 'inputs': {socket: type}, 'outputs': {socket: type},
 	            'samplers': {name: type}, 'menus': {name: [items]} (both optional)}
@@ -76,6 +81,7 @@ def make_node(spec, node_id, literals, upstream, out_socket=None, samplers=None,
 	uniforms:  {socket: [op path, par name]} for unconnected inputs bound to a uniform; they
 	           replace the literal (a connected input stays a link)
 	menus:     {name: item} for the spec's menus (not sockets: compile-time constants)
+	attribs:   {name: [geometry attribute, type]} for the spec's attribs; unset ones use the default
 	Returns the graph including this node, with `output` -> [node_id, out_socket].
 	"""
 	outputs = list(spec.get('outputs', {}))
@@ -109,6 +115,9 @@ def make_node(spec, node_id, literals, upstream, out_socket=None, samplers=None,
 	if spec.get('menus'):
 		merged['nodes'][node_id]['menus'] = {
 			name: item for name, item in (menus or {}).items() if name in spec['menus']}
+	if spec.get('attribs'):
+		merged['nodes'][node_id]['attribs'] = {
+			name: list(a) for name, a in (attribs or {}).items() if name in spec['attribs'] and a[0]}
 	merged['output'] = [node_id, out_socket]
 	if errors:
 		merged['error'] = errors[0]   # first upstream failure wins; Evaluate Shader reports it
@@ -135,6 +144,17 @@ def read_literal(comp, socket, type_):
 	return vals[0] if type_ == 'float' else vals
 
 
+def read_attrib(comp, name, type_, flavor):
+	"""[geometry attribute, type] from a node COMP's attribute-name parameter (and its type menu
+	when the attrib is `typed`); None when the name is blank, so the snippet's default applies."""
+	par = comp.par[par_name(name)]
+	attr = str(par.eval()).strip() if par is not None else ''
+	if not attr:
+		return None
+	type_par = comp.par[par_name(name) + 'type'] if flavor == 'typed' else None
+	return [attr, str(type_par.eval()) if type_par is not None else type_]
+
+
 def read_top_path(comp, name):
 	"""Path of the TOP set in a node COMP's sampler parameter, or None."""
 	par = comp.par[par_name(name)]
@@ -151,7 +171,7 @@ def build_node(scriptOp, spec, out_socket=None):
 	for socket, type_ in spec['inputs'].items():
 		d = comp.op('in_' + socket)
 		upstream[socket] = parse_graph(d.text) if d is not None and d.text.strip() else None
-		if as_uniform and socket in spec['uniforms']:
+		if socket in spec['uniforms'] and (as_uniform or socket in spec.get('driven', ())):
 			uniforms[socket] = [comp.path, par_name(socket)]
 		elif type_ != 'closure':
 			v = read_literal(comp, socket, type_)
@@ -160,8 +180,12 @@ def build_node(scriptOp, spec, out_socket=None):
 	samplers = {name: read_top_path(comp, name) for name in spec.get('samplers', {})}
 	menus = {name: str(comp.par[par_name(name)].eval()) for name in spec.get('menus', {})
 	         if comp.par[par_name(name)] is not None}
+	attribs = {name: read_attrib(comp, name, t, flavor)
+	           for name, (t, _, flavor) in spec.get('attribs', {}).items()}
+	attribs = {name: a for name, a in attribs.items() if a}
 	try:
-		g = make_node(spec, 'n%d' % comp.id, literals, upstream, out_socket, samplers, uniforms, menus)
+		g = make_node(spec, 'n%d' % comp.id, literals, upstream, out_socket, samplers, uniforms, menus,
+		              attribs)
 	except (MatxError, ValueError) as e:
 		g = empty_graph()
 		g['error'] = '%s: %s' % (comp.path, e)

@@ -3,9 +3,11 @@ Script DAT callbacks for the EvaluateShader COMP: the DAT named `vertex` or `pix
 stage of codegen.generate() for the graph arriving in the COMP's `in_graph` In DAT (the Surface
 input: a shading node, or any value, shaded as emission). The DAT named `samplers` outputs a
 (name, top) table of the sampler uniforms the pixel shader declares, and the DAT named `uniforms`
-a (name, op, par, page) table of the value uniforms (Value/RGB nodes with As Uniform on). The
-COMP's `sampler_exec` and `uniform_exec` DAT Executes call apply_samplers() / apply_uniforms()
-when a table changes, which bind them on glsl_mat's Samplers, Colors and Vectors pages.
+a (name, op, par, page) table of the value uniforms (Value/RGB nodes with As Uniform on), and
+the DAT named `attribs` a (name, type) table of the geometry attributes the vertex shader reads
+with TDAttrib_<Name>(). The COMP's `sampler_exec`, `uniform_exec` and `attrib_exec` DAT Executes
+call apply_samplers() / apply_uniforms() / apply_attribs() when a table changes, which bind
+them on glsl_mat's Samplers, Colors, Vectors and Attributes pages.
 
 When the graph is missing or cannot be generated (for example a sampler has no TOP) the shader DATs output codegen.fallback() instead and report why. The GLSL
 MAT must never receive empty source: TouchDesigner crashes cooking a rendered GLSL MAT whose
@@ -15,7 +17,8 @@ from typing import Optional
 
 
 # Script DATs that output a binding table instead of shader text: name -> header row
-BINDING_TABLES = {'samplers': ['name', 'top'], 'uniforms': ['name', 'op', 'par', 'page']}
+BINDING_TABLES = {'samplers': ['name', 'top'], 'uniforms': ['name', 'op', 'par', 'page'],
+                  'attribs': ['name', 'type']}
 
 
 def load_library(snippets_comp: COMP) -> tuple:
@@ -86,6 +89,22 @@ def apply_samplers(table: DAT, mat: glslMAT) -> None:
 		values = {'name': name, 'top': mat.relativePath(top) if top is not None else ''}
 		for key, val in values.items():
 			par = mat.par['sampler%d%s' % (i, key)]
+			if par.val != val:
+				par.val = val
+
+
+def apply_attribs(table: DAT, mat: glslMAT) -> None:
+	"""Makes mat's Attributes page match the (name, type) rows of table: one block per geometry
+	attribute the vertex shader reads, which is what declares TDAttrib_<Name>(). TD keeps at
+	least one block, left blank when the graph reads none. Unchanged values are not rewritten."""
+	rows = [(table[r, 0].val, table[r, 1].val) for r in range(1, table.numRows)]
+	seq = mat.seq.attr
+	if seq.numBlocks != max(1, len(rows)):
+		seq.numBlocks = max(1, len(rows))
+	for i in range(seq.numBlocks):
+		name, type_ = rows[i] if i < len(rows) else ('', 'float')
+		for key, val in (('name', name), ('type', type_)):
+			par = mat.par['attr%d%s' % (i, key)]
 			if par.val != val:
 				par.val = val
 

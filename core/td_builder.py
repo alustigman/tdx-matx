@@ -9,15 +9,17 @@ Builds the tdx-matx library inside the `matx` COMP (op shortcut `Matx`) from the
 A node COMP gets an In DAT per @in socket, a Menu parameter per @menu (no socket: a shader
 constant), a custom parameter per literal input (none for a
 closure, nor for an input whose default is a vertex attribute such as `uv`), a TOP parameter per
-@sampler, an `Asuniform` toggle when the snippet declares @uniform inputs, and a Script DAT + Out
-DAT per @out socket. Every node gets an `Editshader` pulse on its first page (Matx) that opens its
+@sampler, a Str parameter per @attrib (the geometry attribute's name, plus a `<Name>type` Menu
+for a `typed` one), an `Asuniform` toggle when the snippet declares @uniform inputs (a driven
+uniform's parameter runs its expression instead), and a Script DAT + Out DAT per @out socket. Every node gets an `Editshader` pulse on its first page (Matx) that opens its
 snippet in the external editor (see edit_shader); a node with outputs also gets a `Preview` toggle
 there that creates or removes its `preview` COMP (see set_preview). One `par_exec` Parameter
 Execute handles both.
 
 Run it with the Matx COMP's `Build` pulse, or `op.Matx.op('core/td_builder').module.build_all(op.Matx)`.
 Re-running is safe: existing COMPs and the values of their parameters are kept; In/Out DATs and
-parameters are added to match the snippet headers. Sockets that disappeared from a header lose
+parameters are added to match the snippet headers. Build also upgrades every copy of a node in
+the project (see upgrade_copies), so the copies follow a snippet whose sockets changed. Sockets that disappeared from a header lose
 their DATs, but their parameters are only reported, never destroyed.
 """
 import json
@@ -38,10 +40,17 @@ def _snap(v: float) -> int:
 	return int(math.ceil(v / GRID) * GRID)
 
 
+# lower-case words shown in capitals in labels
+ACRONYMS = ('rgb', 'hsv', 'hsl', 'ior', 'uv', 'bw', 'xyz', 'bsdf', 'ao')
+
+
 def _label(socket: str) -> str:
-	"""base_color -> Base Color, emissionColor -> Emission Color."""
-	words = re.sub(r'([a-z0-9])([A-Z])', r'\1 \2', socket).replace('_', ' ').split()
-	return ' '.join(w[:1].upper() + w[1:] for w in words)
+	"""base_color -> Base Color, emissionColor -> Emission Color, RGBToBW -> RGB To BW,
+	3d -> 3D, ior -> IOR."""
+	spaced = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1 \2', re.sub(r'([a-z0-9])([A-Z])', r'\1 \2', socket))
+	words = spaced.replace('_', ' ').split()
+	return ' '.join(w.upper() if w in ACRONYMS or re.match(r'\d+d$|f\d+$', w) else w[:1].upper() + w[1:]
+	                for w in words)
 
 
 def _norm_range(default) -> tuple:
@@ -108,7 +117,9 @@ _STYLE_FAMILY = {'RGB': ('RGB', 'RGBA'), 'XY': ('XY', 'XYZW'), 'XYZ': ('XYZ', 'X
 
 
 def _ensure_par(comp: COMP, page, name: str, style: str, report: list, label: str, help_: str,
-                default=None, norm=None, read_only=False, menu=None) -> list:
+                default=None, norm=None, read_only=False, menu=None, expr: Optional[str] = None) -> list:
+	"""Get-or-create a custom parameter (the Pars of its tuplet). `expr` makes expression mode
+	running it the parameter's default, applied to the value only when the parameter is created."""
 	found = [p for p in comp.customPars if p.tupletName == name]
 	created = not found
 	if created:
@@ -131,6 +142,12 @@ def _ensure_par(comp: COMP, page, name: str, style: str, report: list, label: st
 				p.val = d
 		if norm is not None:
 			p.normMin, p.normMax = norm
+		if expr is not None:
+			p.defaultExpr = expr
+			p.defaultMode = ParMode.EXPRESSION
+			if created:
+				p.expr = expr
+				p.mode = ParMode.EXPRESSION
 	return found
 
 
@@ -243,11 +260,24 @@ def ensure_node_contents(comp: COMP, snip: dict, report: list) -> COMP:
 		            '%s of this node. A constant compiled into the shader (changing it recompiles), '
 		            'not an input socket.' % label,
 		            default=items[0], menu=(items, [_label(i) for i in items]))
-	if snip['uniforms']:
+	choosable = [n for n in snip['uniforms'] if n not in snip['driven']]
+	if choosable:
 		_ensure_par(comp, inputs_page, 'Asuniform', 'Toggle', report, 'As Uniform',
 		            'On: %s becomes a uniform on the GLSL MAT, so animating it does not recompile '
 		            'the shader. Off: the value is baked into the shader as a literal.'
-		            % ', '.join(_label(n) for n in snip['uniforms']), default=False)
+		            % ', '.join(_label(n) for n in choosable), default=False)
+	for (ty, name, default, flavor) in snip['attribs']:
+		label = _label(name)
+		_ensure_par(comp, inputs_page, matx.par_name(name), 'Str', report, label,
+		            'Name of the geometry attribute this node reads (a POP or SOP attribute such as '
+		            'Tex, Color or a custom one). It is declared on the Attributes page of the Evaluate '
+		            "Shader's GLSL MAT.%s" % (' For SOPs this is texture layer 0 (uv).' if flavor == 'texcoord' else ''),
+		            default=default)
+		if flavor == 'typed':
+			types = ['float', 'vec2', 'vec3', 'vec4']
+			_ensure_par(comp, inputs_page, matx.par_name(name) + 'type', 'Menu', report, label + ' Type',
+			            "Size of the attribute. It must match the geometry's attribute, or the values "
+			            'read are wrong.', default=ty, menu=(types, ['Float', 'Vec2', 'Vec3', 'Vec4']))
 	for (ty, name) in snip['samplers']:
 		label = _label(name)
 		_ensure_par(comp, inputs_page, matx.par_name(name), 'TOP', report, label,
@@ -258,9 +288,12 @@ def ensure_node_contents(comp: COMP, snip: dict, report: list) -> COMP:
 		ins.append(_ensure_io(comp, inDAT, 'in_' + name, i, label))
 		if ty == 'closure' or isinstance(default, str):   # closures and attribute defaults: connector only
 			continue
+		help_ = '%s (%s) used when the %s input is not connected.' % (label, ty, label)
+		if name in snip['driven']:
+			help_ += (' Always a uniform on the GLSL MAT: the expression (%s by default) animates '
+			          'it without recompiling the shader.' % snip['driven'][name])
 		pars = _ensure_par(comp, inputs_page, matx.par_name(name), _par_style(ty, name), report, label,
-		                   '%s (%s) used when the %s input is not connected.' % (label, ty, label),
-		                   default=default, norm=_norm_range(default))
+		                   help_, default=default, norm=_norm_range(default), expr=snip['driven'].get(name))
 		# greyed out while a wire feeds the socket (in_<name> is connector i)
 		enable = 'len(me.inputConnectors[%d].connections) == 0' % i
 		for p in pars:
@@ -340,6 +373,7 @@ def set_preview(comp: COMP, report: Optional[list] = None) -> None:
 	callbacks = op.Matx.op('core/td_eval_callbacks').module
 	callbacks.apply_samplers(preview.op('samplers'), preview.op('glsl_mat'))
 	callbacks.apply_uniforms(preview.op('uniforms'), preview.op('glsl_mat'))
+	callbacks.apply_attribs(preview.op('attribs'), preview.op('glsl_mat'))
 	comp.par.opviewer = './preview/' + geo.name
 	comp.viewer = True
 
@@ -379,6 +413,12 @@ def onTableChange(dat):
 	op.Matx.op('core/td_eval_callbacks').module.apply_uniforms(dat, dat.parent().op('glsl_mat'))
 '''
 
+ATTRIB_EXEC = '''\
+# Generated by core/td_builder.py: declares the geometry attributes of the generated shader on glsl_mat.
+def onTableChange(dat):
+	op.Matx.op('core/td_eval_callbacks').module.apply_attribs(dat, dat.parent().op('glsl_mat'))
+'''
+
 
 def ensure_evaluate_comp(library: COMP, report: list) -> COMP:
 	comp = library.op('EvaluateShader')
@@ -398,6 +438,7 @@ def ensure_evaluate_contents(comp: COMP, report: list, material_out: bool = True
 	pixel = _ensure_script(comp, 'pixel', EVAL_CALLBACKS)
 	samplers = _ensure_script(comp, 'samplers', EVAL_CALLBACKS)
 	uniforms = _ensure_script(comp, 'uniforms', EVAL_CALLBACKS)
+	attribs = _ensure_script(comp, 'attribs', EVAL_CALLBACKS)
 	mat = comp.op('glsl_mat')
 	if mat is None:
 		mat = comp.create(glslMAT, 'glsl_mat')
@@ -411,7 +452,8 @@ def ensure_evaluate_contents(comp: COMP, report: list, material_out: bool = True
 	mat.par.pdat = 'pixel'
 	execs = []
 	for ex_name, table, text in (('sampler_exec', 'samplers', SAMPLER_EXEC),
-	                             ('uniform_exec', 'uniforms', UNIFORM_EXEC)):
+	                             ('uniform_exec', 'uniforms', UNIFORM_EXEC),
+	                             ('attrib_exec', 'attribs', ATTRIB_EXEC)):
 		ex = comp.op(ex_name)
 		if ex is None:
 			ex = comp.create(datexecuteDAT, ex_name)
@@ -423,12 +465,14 @@ def ensure_evaluate_contents(comp: COMP, report: list, material_out: bool = True
 	callbacks = op.Matx.op('core/td_eval_callbacks').module
 	callbacks.apply_samplers(samplers, mat)
 	callbacks.apply_uniforms(uniforms, mat)
+	callbacks.apply_attribs(attribs, mat)
 	out = None
 	if material_out:
 		out = _ensure_io(comp, outMAT, 'out1', 0, 'Material')
 		if not out.inputs or out.inputs[0] != mat:
 			mat.outputConnectors[0].connect(out.inputConnectors[0])
-	_place_columns([[src], [vertex, pixel, samplers, uniforms], execs, [mat]] + ([[out]] if out else []))
+	_place_columns([[src], [vertex, pixel, samplers, uniforms, attribs], execs, [mat]]
+	               + ([[out]] if out else []))
 	for d in mat.docked:
 		d.nodeX = mat.nodeX + (mat.nodeWidth - d.nodeWidth) / 2
 		d.nodeY = mat.nodeY - d.nodeHeight - 30
@@ -481,10 +525,29 @@ def build_all(matx_comp: COMP) -> list:
 	comps.append(comp)
 	menu_info[comp.name] = (_label(comp.name), 'Output')
 	_place_grid(comps, COLUMNS)
+	upgrade_copies(matx_comp, library, snippets, report)
 	fam = ensure_fam(matx_comp, library, menu_info, report)
 	_place_columns([[matx_comp.op('build_exec')], [matx_comp.op('core')], [snippets], [library],
 	                [o for o in (fam, matx_comp.op('scratch')) if o is not None]])
 	return report
+
+
+def upgrade_copies(matx_comp: COMP, library: COMP, snippets: COMP, report: list) -> None:
+	"""Brings every copy of a library node in the project up to date with its snippet, and every
+	copy of EvaluateShader up to date with the builder: the same get-or-create as the library
+	nodes, so parameter values and wires of sockets that still exist are kept."""
+	codegen = matx_comp.op('core/codegen').module
+	skip = ('/sys/', '/ui/', '/local/', library.path + '/')
+	for comp in root.findChildren(type=baseCOMP):
+		if (comp.path + '/').startswith(skip) or comp.name == 'preview':
+			continue
+		node_type = comp.par['Nodetype']
+		if node_type is not None:
+			snippet = snippets.op(str(node_type.eval()))
+			if snippet is not None:
+				ensure_node_contents(comp, codegen.parse_snippet(snippet.text), report)
+		elif comp.op('in_graph') is not None and comp.op('glsl_mat') is not None and comp.op('pixel') is not None:
+			ensure_evaluate_contents(comp, report)
 
 
 # --------------------------------------------------------------------------

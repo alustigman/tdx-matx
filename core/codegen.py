@@ -15,14 +15,17 @@ Snippet files (glsl/nodes/*.glsl) start with a header of `// @key value` lines:
     // @requires hash            (helper file glsl/lib/hash.glsl, included once)
     // @sampler sampler2D image  (a texture per node instance, see SAMPLER_TYPES)
     // @uniform value            (an @in the node may bind to a uniform instead of a literal)
+    // @uniform time = absTime.seconds   (an @in that is always a uniform, driven by an expression)
     // @menu  operation add subtract   (a constant chosen from a menu, the first item by default)
+    // @attrib vec3 attribute = Tex texcoord   (a geometry attribute chosen by name, see below)
 
 The graph's `output` ([node_id, socket]) is the surface the shader renders. A closure output
 supplies radiance and alpha; any other value is shaded as emission, converted to vec4 like any
 link except that a float is opaque grey (float x -> vec4(vec3(x), 1.0), vec3 c -> vec4(c, 1.0)).
 
-The body must define `void matx_<type>(<samplers...>, <menus...>, <ins...>, out <outs...>)` with
-parameters in the order the @sampler, @menu, @in, then @out lines appear (a menu is an `int`).
+The body must define `void matx_<type>(<samplers...>, <menus...>, <attribs...>, <ins...>,
+out <outs...>)` with parameters in the order the @sampler, @menu, @attrib, @in, then @out lines
+appear (a menu is an `int`).
 
 A menu is not a socket: the node carries `"menus": {name: item}` in the graph and the call passes
 the item as a compile-time constant. Each menu item gets `const int MATX_<TYPE>_<MENU>_<ITEM>`
@@ -38,7 +41,18 @@ A node can carry `"uniforms": {input: [op path, par name]}` for inputs its snipp
 a literal, and generate() returns [uniform, op path, par name, page] rows for the host to bind
 on the GLSL MAT, so the value can change without recompiling the shader. A colour input (see
 is_color) goes on the MAT's Colors page, which feeds a vec4 uniform (a vec3 input reads its .rgb);
-any other input goes on the Vectors page.
+any other input goes on the Vectors page. `// @uniform <input> = <expression>` makes the input
+always a uniform: the node's parameter runs the TouchDesigner expression (Time: absTime.seconds).
+
+`// @attrib <type> <name> = <Default> [texcoord | typed]` reads a geometry attribute (a POP or SOP
+attribute such as Tex, Color or a custom one) whose NAME is chosen on the node: the node carries
+`"attribs": {name: [attribute name, type]}`. The vertex shader reads it with TDAttrib_<Name>()
+and passes it to the pixel shader in the Vertex block (`attr_<Name>`), and generate() returns
+[attribute name, MAT type] rows for the host to declare on the GLSL MAT's Attributes page, which
+is what makes TDAttrib_<Name>() exist. The declared size must match the geometry's attribute, so
+a `typed` attrib lets the node choose it (float..vec4; the value is converted to the snippet's
+parameter type). A `texcoord` attrib (vec3) is read with TDTexAttrib_<Name>(0u), which is the POP
+attribute for POPs and uv[0] for SOPs; `Tex` read that way is the built-in `uv` attribute.
 """
 import re
 
@@ -48,6 +62,9 @@ GLSL_TYPE = {'float': 'float', 'vec2': 'vec2', 'vec3': 'vec3', 'vec4': 'vec4',
              CLOSURE: 'MatxClosure'}
 COMPONENTS = {'float': 1, 'vec2': 2, 'vec3': 3, 'vec4': 4}
 SAMPLER_TYPES = ('sampler2D',)
+# abstract type -> type menu value on the GLSL MAT's Attributes page
+MAT_ATTRIB_TYPE = {'float': 'float', 'vec2': 'float2', 'vec3': 'float3', 'vec4': 'float4'}
+ATTRIB_FLAVORS = ('texcoord', 'typed')
 # a vec3/vec4 socket whose name contains one of these is a vector, otherwise a colour
 SPATIAL_WORDS = ('vector', 'normal', 'pos', 'uv', 'coord', 'offset', 'dir', 'tangent', 'scale')
 
@@ -65,9 +82,16 @@ ATTRIBUTES = {
 	'color':        ('vec4',     'color',          'TDInstanceColor(TDColor())'),
 	'world_pos':    ('vec3',     'worldSpacePos',  'worldSpacePos.xyz'),
 	'world_normal': ('vec3',     'worldSpaceNorm', 'normalize(TDDeformNorm(normal))'),
-	'uv':           ('vec3',     'uv',             'TDInstanceTexCoord(TDTexCoord(0u))'),
+	'object_pos':   ('vec3',     'objectPos',      'pos'),
+	'object_normal': ('vec3',    'objectNorm',     'normal'),
+	'uv':           ('vec3',     'uv',             'TDInstanceTexCoord(TDTexAttrib_Tex(0u))'),
 	'camera_index': ('flat int', 'cameraIndex',    'TDCameraIndex()'),
 }
+
+# Built-in attributes that read a geometry attribute, which must then be declared on the GLSL
+# MAT's Attributes page: name -> (geometry attribute, abstract type). TDTexCoord(0u) is empty
+# for POPs; TDTexAttrib_Tex(0u) is Tex for POPs and uv[0] for SOPs.
+ATTRIBUTE_GEO = {'uv': ('Tex', 'vec3')}
 
 # The shader output (fog) reads these whatever the graph contains.
 SURFACE_ATTRS = ('world_pos', 'camera_index')
@@ -102,9 +126,11 @@ def _parse_default(type_, text):
 
 def parse_snippet(text):
 	"""Returns dict(type, samplers=[(type,name)], menus=[(name,[items])], ins=[(type,name,default)],
-	outs=[(type,name)], attrs, requires, uniforms, category, body). A default is a float, a list of floats, an attribute name or None."""
+	outs=[(type,name)], attrs, requires, uniforms, driven={uniform: expression},
+	attribs=[(type,name,default attribute,flavor)], category, body). A default is a float, a list
+	of floats, an attribute name or None."""
 	snip = {'type': None, 'samplers': [], 'ins': [], 'outs': [], 'attrs': [], 'requires': [],
-	        'uniforms': [], 'menus': [], 'category': None}
+	        'uniforms': [], 'driven': {}, 'menus': [], 'attribs': [], 'category': None}
 	body = []
 	for line in text.splitlines():
 		m = re.match(r'\s*//\s*@(\w+)\s*(.*?)\s*$', line)
@@ -135,7 +161,21 @@ def parse_snippet(text):
 		elif key == 'requires':
 			snip['requires'].extend(rest.split())
 		elif key == 'uniform':
-			snip['uniforms'].extend(rest.split())
+			if '=' in rest:   # `name = expression`: always a uniform, the parameter runs the expression
+				name, expr = (x.strip() for x in rest.split('=', 1))
+				if not re.match(r'\w+$', name) or not expr:
+					raise MatxError('bad @uniform line: %r' % line)
+				snip['uniforms'].append(name)
+				snip['driven'][name] = expr
+			else:
+				snip['uniforms'].extend(rest.split())
+		elif key == 'attrib':
+			m2 = re.match(r'(\w+)\s+(\w+)\s*=\s*([A-Za-z_]\w*)(?:\s+(\w+))?$', rest)
+			if not m2 or m2.group(1) not in COMPONENTS or (m2.group(4) or 'typed') not in ATTRIB_FLAVORS \
+			        or (m2.group(4) == 'texcoord' and m2.group(1) != 'vec3'):
+				raise MatxError('bad @attrib line (want: type name = Attribute [texcoord|typed], '
+				                'texcoord being vec3): %r' % line)
+			snip['attribs'].append(m2.groups())
 		elif key == 'sampler':
 			m2 = re.match(r'(\w+)\s+(\w+)$', rest)
 			if not m2 or m2.group(1) not in SAMPLER_TYPES:
@@ -143,7 +183,8 @@ def parse_snippet(text):
 			snip['samplers'].append((m2.group(1), m2.group(2)))
 		elif key == 'menu':
 			words = rest.split()
-			if len(words) < 2 or not all(re.match(r'[a-z][a-z0-9_]*$', w) for w in words) \
+			if len(words) < 2 or not re.match(r'[a-z]', words[0]) \
+			        or not all(re.match(r'[a-z0-9][a-z0-9_]*$', w) for w in words) \
 			        or len(set(words[1:])) != len(words) - 1:
 				raise MatxError('bad @menu line (want: name item item..., lower case, unique): %r' % line)
 			snip['menus'].append((words[0], words[1:]))
@@ -152,9 +193,15 @@ def parse_snippet(text):
 	if not snip['type']:
 		raise MatxError('snippet has no @type')
 	ins = {name: (t, d) for (t, name, d) in snip['ins']}
+	taken = list(ins) + [n for (_, n) in snip['samplers']]
 	for (name, _) in snip['menus']:
-		if name in ins or name in [n for (_, n) in snip['samplers']]:
+		if name in taken:
 			raise MatxError('@menu %s clashes with an @in or @sampler of the same name' % name)
+		taken.append(name)
+	for (_, name, _, _) in snip['attribs']:
+		if name in taken:
+			raise MatxError('@attrib %s clashes with an @in, @sampler or @menu of the same name' % name)
+		taken.append(name)
 	for name in snip['uniforms']:
 		if name not in ins or ins[name][0] == CLOSURE or isinstance(ins[name][1], str):
 			raise MatxError('@uniform %s must name a non-closure @in without an attribute default' % name)
@@ -294,7 +341,8 @@ def _collect_lib(names, lib, seen, out):
 def generate(graph, snippets, lib=None):
 	"""Shades graph['output'] (see surface_color). Returns dict(vertex=str, pixel=str,
 	attributes=[...], order=[...], samplers=[[uniform, TOP path], ...],
-	uniforms=[[uniform, op path, par name, 'color' | 'vector'], ...])."""
+	uniforms=[[uniform, op path, par name, 'color' | 'vector'], ...],
+	attribs=[[geometry attribute, MAT attribute type], ...])."""
 	lib = lib or {}
 	if graph.get('error'):
 		raise MatxError('upstream node failed: ' + graph['error'])
@@ -315,6 +363,18 @@ def generate(graph, snippets, lib=None):
 	out_types = {}   # var name -> glsl abstract type
 	samplers = []    # (glsl type, uniform name, TOP path)
 	uniforms = []    # (glsl type, uniform name, op path, par name, MAT page)
+	named = []       # (glsl type, Vertex member, vertex expression) of @attrib attributes
+	geo = {}         # geometry attribute -> abstract type, for the MAT's Attributes page
+
+	def use_attr(a):
+		if a not in attrs:
+			attrs.append(a)
+		if a in ATTRIBUTE_GEO:
+			use_geo(*ATTRIBUTE_GEO[a])
+
+	def use_geo(name, ty):
+		if geo.setdefault(name, ty) != ty:
+			raise MatxError('attribute %s is read as %s and as %s' % (name, geo[name], ty))
 
 	for nid in order:
 		node = nodes[nid]
@@ -325,8 +385,7 @@ def generate(graph, snippets, lib=None):
 		if t not in used_types:
 			used_types.append(t)
 			for a in sn['attrs']:
-				if a not in attrs:
-					attrs.append(a)
+				use_attr(a)
 			_collect_lib(sn['requires'], lib, seen_lib, libs)
 
 		args = []
@@ -342,6 +401,24 @@ def generate(graph, snippets, lib=None):
 			if item not in items:
 				raise MatxError('node %s (%s): %r is not a %s option' % (nid, t, item, name))
 			args.append(menu_constant(t, name, item))
+		for (ty, name, default, flavor) in sn['attribs']:
+			a_name, a_type = node.get('attribs', {}).get(name) or (default, ty)
+			if not re.match(r'[A-Za-z_]\w*$', str(a_name)):
+				raise MatxError('node %s (%s): %r is not an attribute name' % (nid, t, a_name))
+			if a_type not in COMPONENTS or (flavor != 'typed' and a_type != ty):
+				raise MatxError('node %s (%s): attribute %s cannot be read as %s' % (nid, t, a_name, a_type))
+			use_geo(a_name, a_type)
+			if flavor == 'texcoord' and (a_name, a_type) == ATTRIBUTE_GEO['uv']:
+				use_attr('uv')
+				member = ATTRIBUTES['uv'][1]
+			else:
+				if flavor == 'texcoord':
+					member, expr = 'tex_' + a_name, 'TDInstanceTexCoord(TDTexAttrib_%s(0u))' % a_name
+				else:
+					member, expr = 'attr_' + a_name, 'TDAttrib_%s()' % a_name
+				if member not in [m for (_, m, _) in named]:
+					named.append((GLSL_TYPE[a_type], member, expr))
+			args.append(convert('iVert.' + member, a_type, ty))
 		for (ty, name, default) in sn['ins']:
 			v = node.get('inputs', {}).get(name, default)
 			ref = node.get('uniforms', {}).get(name)
@@ -361,8 +438,7 @@ def generate(graph, snippets, lib=None):
 			if isinstance(v, str):
 				if v not in ATTRIBUTES:
 					raise MatxError('node %s (%s): unknown attribute %r' % (nid, t, v))
-				if v not in attrs:
-					attrs.append(v)
+				use_attr(v)
 				a_type, member, _ = ATTRIBUTES[v]
 				args.append(convert('iVert.' + member, a_type, ty))
 			elif is_link(v):
@@ -385,14 +461,12 @@ def generate(graph, snippets, lib=None):
 	if key not in out_types:
 		raise MatxError('node %s (%s) has no output %r' % (root, nodes[root]['type'], socket))
 	decls = [(ty, u) for (ty, u, _) in samplers] + [(ty, u) for (ty, u, _, _, _) in uniforms]
-	pixel = _pixel(snippets, body, attrs, libs, used_types, surface_color(key, out_types[key]), decls)
-	return {'vertex': _vertex(attrs), 'pixel': pixel, 'attributes': attrs, 'order': order,
+	members = [ATTRIBUTES[a] for a in ATTRIBUTES if a in attrs] + named
+	pixel = _pixel(snippets, body, members, libs, used_types, surface_color(key, out_types[key]), decls)
+	return {'vertex': _vertex(members), 'pixel': pixel, 'attributes': attrs, 'order': order,
 	        'samplers': [[u, path] for (_, u, path) in samplers],
-	        'uniforms': [[u, path, par, page] for (_, u, path, par, page) in uniforms]}
-
-
-def _ordered(attrs):
-	return [a for a in ATTRIBUTES if a in attrs]
+	        'uniforms': [[u, path, par, page] for (_, u, path, par, page) in uniforms],
+	        'attribs': [[name, MAT_ATTRIB_TYPE[ty]] for name, ty in geo.items()]}
 
 
 VERTEX_HEAD = '''\
@@ -450,18 +524,18 @@ PIXEL_TAIL = '''\
 '''
 
 
-def _block(keyword, instance, attrs):
+def _block(keyword, instance, members):
+	"""The Vertex interface block for members [(glsl type, name, vertex expression)]."""
 	lines = [keyword, '{']
-	for a in _ordered(attrs):
-		t, member, _ = ATTRIBUTES[a]
+	for (t, member, _) in members:
 		lines.append('\t%s %s;' % (t, member))
 	lines.append('} %s;' % instance)
 	return '\n'.join(lines) + '\n'
 
 
-def _vertex(attrs):
-	assigns = ''.join('\toVert.%s = %s;\n' % (ATTRIBUTES[a][1], ATTRIBUTES[a][2]) for a in _ordered(attrs))
-	return ('// generated by tdx-matx -- do not edit\n' + _block('out Vertex', 'oVert', attrs)
+def _vertex(members):
+	assigns = ''.join('\toVert.%s = %s;\n' % (member, expr) for (_, member, expr) in members)
+	return ('// generated by tdx-matx -- do not edit\n' + _block('out Vertex', 'oVert', members)
 	        + '\nvoid main()\n{\n' + VERTEX_HEAD + '\n' + assigns + '\n' + VERTEX_TAIL + '}\n')
 
 
@@ -480,9 +554,9 @@ def menu_constant(type_, menu, item):
 	return ('MATX_%s_%s_%s' % (type_, menu, item)).upper()
 
 
-def _pixel(snippets, body, attrs, libs, used_types, surface, decls):
+def _pixel(snippets, body, members, libs, used_types, surface, decls):
 	lines = ['// generated by tdx-matx -- do not edit', '#include <TDColorSpace>', '',
-	         _block('in Vertex', 'iVert', attrs),
+	         _block('in Vertex', 'iVert', members),
 	         '// Output variable for the color',
 	         'layout(location = 0) out vec4 oFragColor[TD_NUM_COLOR_BUFFERS];', '']
 	if decls:

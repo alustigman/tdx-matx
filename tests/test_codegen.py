@@ -204,6 +204,60 @@ class Codegen(unittest.TestCase):
 		self.assertEqual([n for (_, n, _) in SNIPS['VectorMath']['ins']],
 		                 ['vector_a', 'vector_b', 'vector_c', 'scale'])
 
+	def test_geometry_attributes(self):
+		g = {'version': 1, 'output': ['n_mix', 'result'], 'nodes': {
+			'n_uv': {'type': 'TexCoord', 'inputs': {}},
+			'n_uv2': {'type': 'TexCoord', 'inputs': {}, 'attribs': {'attribute': ['Tex2', 'vec3']}},
+			'n_c': {'type': 'Attribute', 'inputs': {}},
+			'n_f': {'type': 'Attribute', 'inputs': {}, 'attribs': {'attribute': ['Age', 'float']}},
+			'n_f2': {'type': 'Attribute', 'inputs': {}, 'attribs': {'attribute': ['Age', 'float']}},
+			'n_add': {'type': 'VectorMath', 'inputs': {'vector_a': ['n_uv', 'uv'], 'vector_b': ['n_uv2', 'uv'],
+			                                           'scale': ['n_f2', 'fac']}},
+			'n_mix': {'type': 'MixColor', 'inputs': {'fac': ['n_f', 'fac'], 'a': ['n_c', 'color'],
+			                                         'b': ['n_add', 'vector']}}}}
+		r = codegen.generate(g, SNIPS, LIB)
+		v, p = r['vertex'], r['pixel']
+		# Tex read as a texture coordinate is the built-in uv; TDTexCoord(0u) is empty for POPs
+		self.assertIn('oVert.uv = TDInstanceTexCoord(TDTexAttrib_Tex(0u));', v)
+		self.assertIn('oVert.tex_Tex2 = TDInstanceTexCoord(TDTexAttrib_Tex2(0u));', v)
+		self.assertIn('oVert.attr_Color = TDAttrib_Color();', v)
+		self.assertEqual(v.count('oVert.attr_Age = TDAttrib_Age();'), 1)   # shared by both nodes
+		self.assertIn('\tvec4 attr_Color;', p)
+		self.assertIn('\tfloat attr_Age;', p)
+		self.assertIn('matx_TexCoord(iVert.uv, n_uv_uv, n_uv_window);', p)
+		self.assertIn('matx_Attribute(vec4(iVert.attr_Age), n_f_color', p)   # typed: converted to vec4
+		self.assertEqual(sorted(r['attribs']), [['Age', 'float'], ['Color', 'float4'],
+		                                        ['Tex', 'float3'], ['Tex2', 'float3']])
+		self.assertEqual(codegen.generate(example(), SNIPS, LIB)['attribs'], [['Tex', 'float3']])
+		g['nodes']['n_f']['attribs'] = {'attribute': ['Color', 'vec3']}
+		with self.assertRaisesRegex(codegen.MatxError, 'Color is read as'):
+			codegen.generate(g, SNIPS, LIB)
+		g['nodes']['n_f']['attribs'] = {'attribute': ['not a name', 'vec3']}
+		with self.assertRaisesRegex(codegen.MatxError, 'not an attribute name'):
+			codegen.generate(g, SNIPS, LIB)
+		g['nodes']['n_f']['attribs'] = {'attribute': ['Age', 'float']}
+		g['nodes']['n_uv']['attribs'] = {'attribute': ['Tex', 'vec2']}   # not typed: fixed size
+		with self.assertRaisesRegex(codegen.MatxError, 'cannot be read as vec2'):
+			codegen.generate(g, SNIPS, LIB)
+
+	def test_attribs_recorded_on_node(self):
+		spec = matx.spec_from_snippet(SNIPS['Attribute'])
+		self.assertEqual(spec['attribs'], {'attribute': ('vec4', 'Color', 'typed')})
+		g = matx.make_node(spec, 'n1', {}, {}, attribs={'attribute': ['Foo', 'vec3'], 'other': ['X', 'float']})
+		self.assertEqual(g['nodes']['n1']['attribs'], {'attribute': ['Foo', 'vec3']})
+		self.assertNotIn('attribs', matx.make_node(Graph.SPEC, 'n2', {}, {})['nodes']['n2'])
+
+	def test_every_snippet_generates(self):
+		"""Each node type alone, on defaults, through every output."""
+		for t, sn in SNIPS.items():
+			nodes = {'n_em': {'type': 'EmissionShader', 'inputs': {}}}
+			node = {'type': t, 'inputs': {name: ['n_em', 'bsdf'] for (ty, name, _) in sn['ins'] if ty == 'closure'},
+			        'samplers': {name: '/top' for (_, name) in sn['samplers']}}
+			nodes['n1'] = node
+			for (_, out) in sn['outs']:
+				r = codegen.generate({'version': 1, 'nodes': nodes, 'output': ['n1', out]}, SNIPS, LIB)
+				self.assertIn('matx_%s(' % t, r['pixel'], t)
+
 	def test_menu_recorded_on_node(self):
 		spec = matx.spec_from_snippet(SNIPS['Math'])
 		self.assertNotIn('operation', spec['inputs'])
@@ -217,6 +271,16 @@ class Codegen(unittest.TestCase):
 				codegen.parse_snippet('// @type X\n%s\nvoid matx_X() {}' % bad)
 		with self.assertRaisesRegex(codegen.MatxError, '@sampler'):
 			codegen.parse_snippet('// @type X\n// @sampler samplerCube s\nvoid matx_X() {}')
+		for bad in ('// @attrib vec3 a', '// @attrib vec2 a = Tex texcoord', '// @attrib vec3 a = Tex other',
+		            '// @attrib closure a = Tex', '// @in float a\n// @attrib vec3 a = Tex'):
+			with self.assertRaisesRegex(codegen.MatxError, '@attrib'):
+				codegen.parse_snippet('// @type X\n%s\nvoid matx_X() {}' % bad)
+		with self.assertRaisesRegex(codegen.MatxError, '@uniform'):
+			codegen.parse_snippet('// @type X\n// @in float t\n// @uniform t =\nvoid matx_X() {}')
+		s = codegen.parse_snippet('// @type X\n// @in float t = 0\n// @uniform t = absTime.seconds\n'
+		                          '// @menu dims 3d 2d\nvoid matx_X() {}')
+		self.assertEqual((s['uniforms'], s['driven']), (['t'], {'t': 'absTime.seconds'}))
+		self.assertEqual(s['menus'], [('dims', ['3d', '2d'])])   # an item may start with a digit
 		with self.assertRaisesRegex(codegen.MatxError, 'neither'):
 			codegen.parse_snippet('// @type X\n// @in vec3 v = bogus\nvoid matx_X() {}')
 
