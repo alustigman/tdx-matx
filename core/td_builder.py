@@ -530,7 +530,8 @@ def build_all(matx_comp: COMP) -> list:
 		menu_info[comp.name] = (_label(snip['type']), snip['category'])
 	comp = ensure_evaluate_comp(library, report)
 	comps.append(comp)
-	menu_info[comp.name] = (_label(comp.name), 'Output')
+	# with the shaders: TDFam shows at most 6 groups, and an Output group would push one out
+	menu_info[comp.name] = (_label(comp.name), 'Shader')
 	_place_grid(comps, COLUMNS)
 	upgrade_copies(matx_comp, library, snippets, report)
 	fam = ensure_fam(matx_comp, library, menu_info, report)

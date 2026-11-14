@@ -112,7 +112,7 @@ Algorithm:
 
 ## 2. Node catalogue
 
-Implemented (60). The group is the snippet's `@category`, which is also its group in the MATX TAB menu.
+Implemented (60). The group is the snippet's `@category`, which is also its group in the MATX TAB menu. TDFam shows at most 6 groups, so Evaluate Shader sits in Shader rather than a group of its own.
 
 | Category | Nodes |
 |---|---|
@@ -121,8 +121,7 @@ Implemented (60). The group is the snippet's `@category`, which is also its grou
 | Color | Mix Color (19 blend types), Invert Color, Hue Saturation, Brightness Contrast, Gamma, Posterize |
 | Converter | Math (41 operations), Vector Math (27), Map Range, Clamp, Mix Float, Mix Vector, Separate / Combine XYZ, Separate / Combine Color (RGB, HSV, HSL), RGB To BW, Blackbody, Color Ramp (a Ramp TOP), Shader To RGB |
 | Vector | Mapping, Vector Rotate, Vector Transform, Normal Map, Bump, Polar Coordinates, Twirl, Flipbook, Matcap UV |
-| Shader | Principled BSDF, Diffuse BSDF, Glossy BSDF, Toon BSDF, Emission Shader, Transparent BSDF, Mix Shader, Add Shader |
-| Output | Evaluate Shader (also the material output) |
+| Shader | Principled BSDF, Diffuse BSDF, Glossy BSDF, Toon BSDF, Emission Shader, Transparent BSDF, Mix Shader, Add Shader, Evaluate Shader (the material output) |
 
 Not done: RGB Curves / Float Curve (use Color Ramp with any lookup TOP), Displacement and other vertex-stage nodes, Light Path, Object Info, environment / sky textures, Gabor.
 

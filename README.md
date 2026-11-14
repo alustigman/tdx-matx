@@ -25,8 +25,7 @@ tdx-matx works with [TDFam](https://github.com/dotsimulate/TDFam), the open-sour
 | Color | Mix Color, Invert Color, Hue Saturation, Brightness Contrast, Gamma, Posterize |
 | Converter | Math, Vector Math, Map Range, Clamp, Mix Float, Mix Vector, Separate / Combine XYZ, Separate / Combine Color, RGB To BW, Blackbody, Color Ramp, Shader To RGB |
 | Vector | Mapping, Vector Rotate, Vector Transform, Normal Map, Bump, Polar Coordinates, Twirl, Flipbook, Matcap UV |
-| Shader | Principled BSDF, Diffuse BSDF, Glossy BSDF, Toon BSDF, Emission Shader, Transparent BSDF, Mix Shader, Add Shader |
-| Output | Evaluate Shader |
+| Shader | Principled BSDF, Diffuse BSDF, Glossy BSDF, Toon BSDF, Emission Shader, Transparent BSDF, Mix Shader, Add Shader, Evaluate Shader |
 
 - Press **Build** on `/matx` (Matx page): besides regenerating the nodes, it loads the TDFam component into `/matx/fam` from `third_party/TDFam/TDFam_create.tox` if it is missing, points it at `/matx/nodes`, and writes each node's menu label and group into its TDFam manifest. A new snippet joins the menu on the next Build; its group comes from the snippet's `// @category` header line. When a library node is not in the family colour (a node Build just created, say), Build turns the family's **Install** toggle off and back on a few frames later, which recolours the library.
 - Placing a node from the TAB menu copies the library node with the family colour (set it on `/matx/fam`, Family page), with its **Preview** on (the family's callbacks DAT, `core/td_fam_callbacks.py`, which Build sets as `/matx/fam`'s Callback DAT). Every node also has an **Edit Shader** pulse that opens its `glsl/nodes/<type>.glsl` in your external editor. Placing from Python: `op.Matx.op('fam').PlaceOp(target_comp, 'Noise')`.
