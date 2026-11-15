@@ -4,7 +4,7 @@ See `README.md` for the project overview. This document is a living plan; items 
 
 ## 0. Where we left off (2026-11-14)
 
-**Repo:** `git@github.com:alustigman/tdx-matx.git`. Branch `main`; the node library work below was done on `feature/node-library` and merged (fast-forward) at `ca3db53`.
+**Repo:** `git@github.com:alustigman/tdx-matx.git`. Branch `main`. The node library was built on `feature/node-library` (merged at `ca3db53`); menu-dependent parameters, socket colours, the PBR rename, the Release pulse and previews off by default were built on `feature/conditional-params` and `feature/pbr-release`, merged fast-forward into `main` on 2026-11-14.
 
 **Working end to end in TouchDesigner 2025.33230** (`matx-testingGround.toe`):
 - `/matx` is the library (op shortcut `Matx`): `core/` (Text DATs synced to `core/*.py`), `snippets/` (synced to `glsl/`), `nodes/` (generated node COMPs + `EvaluateShader`), `fam` (TDFam, the MATX TAB menu) and `scratch/`. The **Build** pulse on `/matx` regenerates `snippets/` and `nodes/` from `glsl/nodes/*.glsl`, and upgrades every node copy in the project (details in 3b).
@@ -13,7 +13,7 @@ See `README.md` for the project overview. This document is a living plan; items 
 - 60 nodes in 6 groups, see section 2.
 - Unit tests: `python -m unittest discover -s tests` (32 tests, pure Python, no TD needed), including one that generates every snippet through every output.
 
-**This branch's work (2026-11-14):**
+**Recent work (2026-11-14):**
 1. Geometry attributes by name (`@attrib`): TexCoord reads `Tex` by default, the Attribute node reads any POP attribute, and EvaluateShader declares them on the GLSL MAT's Attributes page (section 1.7).
 2. Driven uniforms (`@uniform time = absTime.seconds`) for the Time node.
 3. 46 new nodes and reworked Noise, Mix Color, Math, Principled BSDF, Emission and TexCoord (section 2), with `glsl/lib/` helpers (`view`, `lighting`, `hash`, `fbm`).
@@ -23,6 +23,7 @@ See `README.md` for the project overview. This document is a living plan; items 
 7. Socket colours from Blender (float grey, vector blue-violet, colour yellow, shader green): each In/Out DAT gets the colour of its socket kind (`codegen.socket_kind`), which the network editor shows on the COMP's connector; `@out vec3 result vector` says what an output carries when its name does not.
 8. Principled BSDF is now **PBR** (`glsl/nodes/PBR.glsl`, `matx_PBR`), after the TouchDesigner MAT it wraps. `td_builder.RENAMED_TYPES` maps old types to new ones; Build moves every node of an old type over in place (Node Type, TDFam manifest type and tag, and its name while it is still named after the old type).
 9. The **Release** pulse on `/matx` (`core/td_release.py`, see README "Release"): Build, then bake `core`, `snippets`, `nodes` and `fam` into one `MATX` COMP with every file reference cleared, and save it to `release/MATX.tox`. The staging copy is made, baked, saved and destroyed in one call: a copied TDFam tries to register its family at the end of the frame, and with `/matx/fam` owning MATX that would open an "Already Registered" dialog. Giving the copy the `Matx` shortcut does not take it from `/matx` (the first holder keeps it), and the value is saved with the release.
+10. Every node starts with Preview off, including nodes placed from the TAB menu.
 
 **Loose ends:**
 - A Sampler, Color Ramp or Triplanar node without a TOP is a generation error (magenta fallback) until a TOP is set on it.
