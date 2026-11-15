@@ -11,7 +11,7 @@ See `README.md` for the project overview. This document is a living plan; items 
 - `/matx_demo` is the user's test scene (a sphere shaded through `evaluate1`).
 - `/matx/scratch/rig` is the **shader test bench**: a POP plane and a SOP plane (or sphere) rendered with the material of `eval1`, driven by `tests/td_bench.py` (`H.compile_all()` compiles every node type on a real GLSL MAT, `H.sheet()` renders contact sheets).
 - 60 nodes in 6 groups, see section 2.
-- Unit tests: `python -m unittest discover -s tests` (36 tests, pure Python, no TD needed), including one that generates every snippet through every output.
+- Unit tests: `python -m unittest discover -s tests` (38 tests, pure Python, no TD needed), including one that generates every snippet through every output.
 
 **Recent work (2026-11-14):**
 1. Geometry attributes by name (`@attrib`): TexCoord reads `Tex` by default, the Attribute node reads any POP attribute, and EvaluateShader declares them on the GLSL MAT's Attributes page (section 1.7).

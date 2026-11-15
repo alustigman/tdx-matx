@@ -23,6 +23,7 @@ gone by then (TDFam logs that it could not reach the registry, nothing else).
 """
 import datetime
 import os
+import re
 from typing import Optional
 
 RELEASE_NAME = 'MATX'                        # the released COMP's name
@@ -83,8 +84,14 @@ def bake(matx_comp: COMP, path: str) -> list:
 
 
 def _about(rel: COMP, report: list) -> None:
-	"""A read-only About page on the released COMP: where and when it was built."""
+	"""A read-only About page on the released COMP: its version, where and when it was built."""
 	page = rel.appendCustomPage('About')
+	version = page.appendStr('Version', label='Version')[0]
+	version.val = changelog_version()
+	version.readOnly = True
+	version.help = ('Release version: the newest entry of CHANGELOG.md when this MATX was baked. '
+	                "'unreleased' when the changelog has none.")
+	report.append('version %s' % version.val)
 	built = page.appendStr('Built', label='Built')[0]
 	built.val = '%s, %s' % (_source_version(), datetime.datetime.now().strftime('%Y-%m-%d %H:%M'))
 	built.readOnly = True
@@ -132,6 +139,20 @@ def _bake_files(rel: COMP, report: list) -> None:
 					and os.path.isabs(str(p.eval())) and p.name not in ('file', 'externaltox')):
 				report.append('WARNING: %s.%s still reads %s' % (o.path, p.name, p.eval()))
 	report.append('baked %d file DATs and %d external .tox references into %s' % (dats, toxes, rel.name))
+
+
+CHANGELOG_ENTRY = re.compile(r'^## \[(\d+\.\d+\.\d+[^\]]*)\]', re.M)
+
+
+def changelog_version(folder: Optional[str] = None) -> str:
+	"""The newest version in CHANGELOG.md (its first `## [x.y.z]` heading), or 'unreleased'.
+	tools/release.py reads the same heading."""
+	try:
+		with open(os.path.join(folder or project.folder, 'CHANGELOG.md'), encoding='utf-8') as f:
+			m = CHANGELOG_ENTRY.search(f.read())
+	except OSError:
+		return 'unreleased'
+	return m.group(1) if m else 'unreleased'
 
 
 def _source_version() -> str:

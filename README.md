@@ -40,6 +40,18 @@ Drop `MATX.tox` into a project and the MATX family installs itself in the TAB me
 
 From Python: `op.Matx.op('core/td_release').module.release(op.Matx)`, or `bake(op.Matx, path)` to save the library as it is without building.
 
+The About page also shows the **Version**: the newest entry of [CHANGELOG.md](CHANGELOG.md) when the tox was baked.
+
+### Publishing a release on GitHub
+
+Releases are on the repository's [Releases page](https://github.com/alustigman/tdx-matx/releases). Each carries `MATX-v<version>.tox` and its changelog notes. Only TouchDesigner can bake the tox, so a release is published from this machine:
+
+1. Add a `## [x.y.z] - YYYY-MM-DD` section at the top of `CHANGELOG.md`, then commit and push it on `main`.
+2. Press **Release** on `/matx`: `release/MATX.tox` is baked with that version and the commit.
+3. Run `python tools/release.py --dry-run` to check everything without changing anything. Then run `python tools/release.py`: it tags `vX.Y.Z`, pushes the tag, and creates the release with the tox and the notes.
+
+The script needs the [GitHub CLI](https://cli.github.com) signed in (`gh auth login`). It stops if the tree is dirty, if `main` isn't pushed, if the tag already exists, or if the tox is older than the last commit.
+
 ## Nodes
 
 60 nodes, most of them ports of Blender's shader nodes (same inputs, same maths), plus a few from other shader graphs (Shape, Triplanar, Twirl, Flipbook, Matcap UV, Posterize, Toon BSDF) and some that only make sense in TouchDesigner (Sampler and Color Ramp read a TOP, Time is a uniform driven by `absTime.seconds`).
@@ -126,6 +138,8 @@ tdx-matx/
   glsl/                      nodes/ (one snippet per node type) and lib/ (helpers shared through @requires: view, lighting, hash, fbm)
   core/                      shared Python (matx.py: graph JSON + node builder, codegen.py: graph -> GLSL, td_builder.py: builds the library in TD, td_release.py: bakes the release .tox) used by all Script DATs
   release/                   (git-ignored) MATX.tox written by the Release pulse, see "Release"
+  tools/release.py           publishes a GitHub release (tag, tox, changelog notes), see "Publishing a release on GitHub"
+  CHANGELOG.md               release notes, newest first; its newest entry is the version the tox is stamped with
   examples/                  demo .toe files
   tests/                     pure-Python tests for graph merging and codegen (run outside TD); td_bench.py drives the shader test bench inside TD (/matx/scratch/rig)
 ```
