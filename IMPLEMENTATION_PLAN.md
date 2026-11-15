@@ -21,6 +21,8 @@ See `README.md` for the project overview. This document is a living plan; items 
 5. Fixes: the TDFam reinstall after a heavy build, binding of an Evaluate Shader wired in the frame it was placed, manifest placement on node copies.
 6. Menu-dependent parameters (`@enable`): a parameter a menu leaves unused is greyed out, like Blender hides it (Noise W outside 1D/4D, Math B for one-input operations and C outside Multiply Add, Compare, Smooth Min/Max and Wrap, and the like on Vector Math, Voronoi, White Noise, Map Range, Mapping, Shape, Vector Rotate, Wave).
 7. Socket colours from Blender (float grey, vector blue-violet, colour yellow, shader green): each In/Out DAT gets the colour of its socket kind (`codegen.socket_kind`), which the network editor shows on the COMP's connector; `@out vec3 result vector` says what an output carries when its name does not.
+8. Principled BSDF is now **PBR** (`glsl/nodes/PBR.glsl`, `matx_PBR`), after the TouchDesigner MAT it wraps. `td_builder.RENAMED_TYPES` maps old types to new ones; Build moves every node of an old type over in place (Node Type, TDFam manifest type and tag, and its name while it is still named after the old type).
+9. The **Release** pulse on `/matx` (`core/td_release.py`, see README "Release"): Build, then bake `core`, `snippets`, `nodes` and `fam` into one `MATX` COMP with every file reference cleared, and save it to `release/MATX.tox`. The staging copy is made, baked, saved and destroyed in one call: a copied TDFam tries to register its family at the end of the frame, and with `/matx/fam` owning MATX that would open an "Already Registered" dialog. Giving the copy the `Matx` shortcut does not take it from `/matx` (the first holder keeps it), and the value is saved with the release.
 
 **Loose ends:**
 - A Sampler, Color Ramp or Triplanar node without a TOP is a generation error (magenta fallback) until a TOP is set on it.
@@ -40,7 +42,7 @@ See `README.md` for the project overview. This document is a living plan; items 
 ## 1. Architecture
 
 ### 1.0 MATX operator family (TDFam)
-`/matx/fam` is a [TDFam](https://github.com/dotsimulate/TDFam) `TDFam_create` component (vendored in `third_party/TDFam/`, Apache-2.0, with its LICENSE and NOTICE) that publishes `/matx/nodes` as the **MATX** family in TouchDesigner's OP Create (TAB) menu. Build (`td_builder.ensure_fam`) loads it from the vendored `.tox` if missing, points its `Opcomp` at `nodes`, runs TDFam's Ensure Manifests (each library node gets a `FamManifest` child COMP), writes each node's `OpInfo` label (`_label` of the snippet type: "Noise Texture", "Principled BSDF") and group (the snippet's `// @category`; EvaluateShader is `Output`), and deploys again so the menu picks them up. Placing from the menu (or `op.Matx.op('fam').PlaceOp(target, op_type)`) copies the library node, tags it, names it `<op_name><n>` and colours it with the family colour. Known upstream noise: two TDFam updater DATs keep `syncfile` paths to `install_scripts/...` that do not exist here, so `/matx/fam` and `/sys/TDFamRegistry` show two "File not found for sync" warnings.
+`/matx/fam` is a [TDFam](https://github.com/dotsimulate/TDFam) `TDFam_create` component (vendored in `third_party/TDFam/`, Apache-2.0, with its LICENSE and NOTICE) that publishes `/matx/nodes` as the **MATX** family in TouchDesigner's OP Create (TAB) menu. Build (`td_builder.ensure_fam`) loads it from the vendored `.tox` if missing, points its `Opcomp` at `nodes`, runs TDFam's Ensure Manifests (each library node gets a `FamManifest` child COMP), writes each node's `OpInfo` label (`_label` of the snippet type: "Noise Texture", "PBR") and group (the snippet's `// @category`; EvaluateShader is `Output`), and deploys again so the menu picks them up. Placing from the menu (or `op.Matx.op('fam').PlaceOp(target, op_type)`) copies the library node, tags it, names it `<op_name><n>` and colours it with the family colour. Known upstream noise: two TDFam updater DATs keep `syncfile` paths to `install_scripts/...` that do not exist here, so `/matx/fam` and `/sys/TDFamRegistry` show two "File not found for sync" warnings.
 
 
 ### 1.1 Data flow
@@ -79,7 +81,7 @@ From the [Script DAT](https://docs.derivative.ca/Script_DAT) and [scriptDAT clas
 Sockets typed `float | vec2 | vec3 | vec4 | closure`. Evaluate Shader inserts GLSL conversions at link sites (float->vec3 splat, vec4->vec3 truncate, vec3->float luminance or `.x`, as Blender does). `closure` links only to `closure` inputs.
 
 ### 1.4 Closures and shading models
-A shading node (Principled BSDF, Diffuse, Glossy, Emission, ...) is a GLSL function returning
+A shading node (PBR, Diffuse, Glossy, Emission, ...) is a GLSL function returning
 
 ```glsl
 struct Closure { vec3 radiance; float alpha; };
@@ -123,7 +125,7 @@ Implemented (60). The group is the snippet's `@category`, which is also its grou
 | Color | Mix Color (19 blend types), Invert Color, Hue Saturation, Brightness Contrast, Gamma, Posterize |
 | Converter | Math (41 operations), Vector Math (27), Map Range, Clamp, Mix Float, Mix Vector, Separate / Combine XYZ, Separate / Combine Color (RGB, HSV, HSL), RGB To BW, Blackbody, Color Ramp (a Ramp TOP), Shader To RGB |
 | Vector | Mapping, Vector Rotate, Vector Transform, Normal Map, Bump, Polar Coordinates, Twirl, Flipbook, Matcap UV |
-| Shader | Principled BSDF, Diffuse BSDF, Glossy BSDF, Toon BSDF, Emission Shader, Transparent BSDF, Mix Shader, Add Shader, Evaluate Shader (the material output) |
+| Shader | PBR, Diffuse BSDF, Glossy BSDF, Toon BSDF, Emission Shader, Transparent BSDF, Mix Shader, Add Shader, Evaluate Shader (the material output) |
 
 Not done: RGB Curves / Float Curve (use Color Ramp with any lookup TOP), Displacement and other vertex-stage nodes, Light Path, Object Info, environment / sky textures, Gabor.
 
@@ -218,7 +220,7 @@ Implemented inside `codegen.generate` (missing output, wrong root type, missing 
 4. **Stages:** no vertex-stage *nodes* in v1 (no displacement), but Evaluate Shader still emits a **vertex shader**. It is generated from the graph's requirements: nodes declare the attributes they need (`uv`, `normal`, `position`, `tangent`, `color`, ...), and the generator adds the matching `out` varyings in the vertex shader (filled from `TDPos()`, `TDNormal()`, `TDTexCoord()`, `TDPointColor()`, with `TDDeform` / `TDWorldToProj` for position) and the matching `in` declarations in the pixel shader. Unused attributes are not emitted.
 5. **TD version:** latest TouchDesigner release; no backward compatibility work.
 
-6. **Lighting scope:** Principled BSDF supports direct lights, environment lights and shadows in v1; TD's `TDLightingPBR` / `TDEnvLightingPBR` handle these.
+6. **Lighting scope:** PBR supports direct lights, environment lights and shadows in v1; TD's `TDLightingPBR` / `TDEnvLightingPBR` handle these.
 7. **Distribution:** everything lives in a single `.toe` for now (node COMPs inside it, no separate `.tox` files yet). Nodes should still be self-contained COMPs so they can be exported to `.tox` / a palette later. Shared Python and GLSL snippets are **the repo files themselves**: Text DATs in the `.toe` are linked to them through their File parameter (Sync to file), so the files on disk are the source of truth and are edited in an external editor.
 8. **Varyings:** position and normal are passed to the pixel shader in world space.
 

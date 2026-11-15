@@ -22,3 +22,6 @@ opencode.json
 .claude/projects/
 briefs/
 .DS_Store
+
+# Baked release .tox (the Release pulse on /matx)
+/release/

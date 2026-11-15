@@ -30,7 +30,7 @@ class Codegen(unittest.TestCase):
 		self.assertIn('flat int cameraIndex;', p)
 		self.assertIn('} iVert;', p)
 		self.assertNotIn('TDCameraIndex', p)
-		self.assertIn('matx_PrincipledBSDF(', p)
+		self.assertIn('matx_PBR(', p)
 		for call in ('#include <TDColorSpace>', 'TDCheckDiscard();',
 		             'TDFog(finalColor, iVert.worldSpacePos.xyz, iVert.cameraIndex)',
 		             'TDDither(finalColor)', 'TDAlphaTest(finalColor.a)',
@@ -82,7 +82,7 @@ class Codegen(unittest.TestCase):
 			g['output'] = out
 			r = codegen.generate(g, SNIPS, LIB)
 			self.assertIn('vec4 finalColor = %s;' % expected, r['pixel'], ty)
-			self.assertNotIn('matx_PrincipledBSDF', r['pixel'])
+			self.assertNotIn('matx_PBR', r['pixel'])
 			# fog still gets its attributes without a shading node
 			self.assertIn('oVert.worldSpacePos = ', r['vertex'])
 			self.assertIn('oVert.cameraIndex = ', r['vertex'])
@@ -305,7 +305,7 @@ class Codegen(unittest.TestCase):
 		kind = codegen.socket_kind
 		self.assertEqual([kind(SNIPS['Mapping'], 'vec3', 'result'), kind(SNIPS['MixColor'], 'vec3', 'result'),
 		                  kind(SNIPS['NoiseTexture'], 'float', 'fac'),
-		                  kind(SNIPS['PrincipledBSDF'], 'closure', 'bsdf'), kind(SNIPS['Mapping'], 'vec3', 'vector')],
+		                  kind(SNIPS['PBR'], 'closure', 'bsdf'), kind(SNIPS['Mapping'], 'vec3', 'vector')],
 		                 ['vector', 'color', 'float', 'shader', 'vector'])
 		self.assertEqual(SNIPS['TexCoord']['kinds'], {'window': 'vector'})
 		with self.assertRaisesRegex(codegen.MatxError, '@out'):

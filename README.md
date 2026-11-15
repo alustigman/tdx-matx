@@ -1,11 +1,11 @@
 # tdx-matx — Node-based Material Shaders for TouchDesigner
 
-`tdx-matx` is a set of TouchDesigner components (`.tox`) that let you build **GLSL MAT** shaders by chaining nodes, much like the Blender shader editor. Each component is one node (Noise Texture, Mix, Color Ramp, Principled BSDF, ...). Instead of passing pixels or CHOP samples, the components pass a **JSON description of a shader graph** from one to the next. A final **Evaluate Shader** component reads that JSON and generates the GLSL vertex/pixel shader code for a GLSL MAT.
+`tdx-matx` is a set of TouchDesigner components (`.tox`) that let you build **GLSL MAT** shaders by chaining nodes, much like the Blender shader editor. Each component is one node (Noise Texture, Mix, Color Ramp, PBR, ...). Instead of passing pixels or CHOP samples, the components pass a **JSON description of a shader graph** from one to the next. A final **Evaluate Shader** component reads that JSON and generates the GLSL vertex/pixel shader code for a GLSL MAT.
 
 ## Core idea
 
 ```
-[Texture Coord] -> [Noise Texture] -> [Color Ramp] -> [Principled BSDF] -> [Evaluate Shader] -> GLSL MAT
+[Texture Coord] -> [Noise Texture] -> [Color Ramp] -> [PBR] -> [Evaluate Shader] -> GLSL MAT
         JSON          JSON +node         JSON +node        JSON +node          JSON -> GLSL
 ```
 
@@ -25,11 +25,20 @@ tdx-matx works with [TDFam](https://github.com/dotsimulate/TDFam), the open-sour
 | Color | Mix Color, Invert Color, Hue Saturation, Brightness Contrast, Gamma, Posterize |
 | Converter | Math, Vector Math, Map Range, Clamp, Mix Float, Mix Vector, Separate / Combine XYZ, Separate / Combine Color, RGB To BW, Blackbody, Color Ramp, Shader To RGB |
 | Vector | Mapping, Vector Rotate, Vector Transform, Normal Map, Bump, Polar Coordinates, Twirl, Flipbook, Matcap UV |
-| Shader | Principled BSDF, Diffuse BSDF, Glossy BSDF, Toon BSDF, Emission Shader, Transparent BSDF, Mix Shader, Add Shader, Evaluate Shader |
+| Shader | PBR, Diffuse BSDF, Glossy BSDF, Toon BSDF, Emission Shader, Transparent BSDF, Mix Shader, Add Shader, Evaluate Shader |
 
 - Press **Build** on `/matx` (Matx page): besides regenerating the nodes, it loads the TDFam component into `/matx/fam` from `third_party/TDFam/TDFam_create.tox` if it is missing, points it at `/matx/nodes`, and writes each node's menu label and group into its TDFam manifest. A new snippet joins the menu on the next Build; its group comes from the snippet's `// @category` header line. When a library node is not in the family colour (a node Build just created, say), Build turns the family's **Install** toggle off and back on a few frames later, which recolours the library.
 - Placing a node from the TAB menu copies the library node with the family colour (set it on `/matx/fam`, Family page), with its **Preview** on (the family's callbacks DAT, `core/td_fam_callbacks.py`, which Build sets as `/matx/fam`'s Callback DAT). Every node also has an **Edit Shader** pulse that opens its `glsl/nodes/<type>.glsl` in your external editor. Placing from Python: `op.Matx.op('fam').PlaceOp(target_comp, 'Noise')`.
 - TDFam is vendored under the Apache License 2.0; its `LICENSE` and `NOTICE` are kept in `third_party/TDFam/`.
+- The PBR node is TouchDesigner's PBR MAT as a shading node (Blender's Principled BSDF plays that role there). Build renames older `PrincipledBSDF` nodes to it in place, keeping their wires and values.
+
+## Release
+
+Press **Release** on `/matx` (Matx page) to get one self-contained `.tox` to use in other projects. It runs Build, then a few frames later saves a Base COMP named `MATX` to **Release File** (`release/MATX.tox` by default, git-ignored). `MATX` holds copies of `core`, `snippets`, `nodes` and the TDFam `fam`, with every file baked in: each DAT that was synced to or loaded from a file keeps its text and loses the file reference, and external `.tox` references inside TDFam are cleared. It also carries the `Matx` op shortcut, this repo's `LICENSE`, TDFam's `NOTICE`, and a read-only **Built** parameter (About page) with the git branch, commit and time it was baked from. The scratch rig and the Build and Release pulses stay behind.
+
+Drop `MATX.tox` into a project and the MATX family installs itself in the TAB menu (the family's Install and Install On Start are on). A project can hold either the development `/matx` or a released `MATX`, not both: they share the `Matx` shortcut and the MATX family name.
+
+From Python: `op.Matx.op('core/td_release').module.release(op.Matx)`, or `bake(op.Matx, path)` to save the library as it is without building.
 
 ## Nodes
 
@@ -54,7 +63,7 @@ Evaluate Shader declares every attribute the graph reads on its GLSL MAT's **Att
 ## Scope
 
 - Target: **GLSL MAT only** (vertex + pixel shader), TouchDesigner's GLSL 3.30+ dialect, using the built-in TD functions (`TDLightingPBR`, `TDEnvLightingPBR`, `TDPerlinNoise`, `TDSimplexNoise`, `TDRGBToHSV`, `TDOutputSwizzle`, ...). Reference: <https://docs.derivative.ca/Write_a_GLSL_Material>
-- Shading: **PBR** through TouchDesigner's own lighting functions (Principled, Diffuse, Glossy and Toon BSDFs, Emission, Transparent), mixed with Mix Shader / Add Shader as in Blender.
+- Shading: **PBR** through TouchDesigner's own lighting functions (PBR, the Diffuse, Glossy and Toon BSDFs, Emission, Transparent), mixed with Mix Shader / Add Shader as in Blender.
 - Out of scope for now: GLSL TOP/POP targets, geometry shaders, node-group nesting, a custom node-editor UI (we use TD's own network editor).
 
 ## Concepts
@@ -64,7 +73,7 @@ Evaluate Shader declares every attribute the graph reads on its GLSL MAT's **Att
 | **Node** | One component. Has a `type`, parameters (constant inputs), and named input/output sockets. |
 | **Socket** | A named input or output of a node, with a data type: `float`, `vec2`, `vec3` (also used for colors), `vec4`, `closure`. |
 | **Link** | An input value of the form `["<node_id>", "<output_name>"]` referencing another node's output. |
-| **Closure** | The result of a shading node (Principled BSDF etc.): a struct holding the lit radiance and alpha, so shader nodes can be mixed and added. |
+| **Closure** | The result of a shading node (PBR etc.): a struct holding the lit radiance and alpha, so shader nodes can be mixed and added. |
 | **Snippet** | A GLSL function template associated with one node type, stored in the node's `.tox` (a `.glsl` file in `glsl/`, linked to a Text DAT in the .toe). |
 | **Evaluate Shader** | The terminal component that turns the JSON graph into shader source. |
 
@@ -87,7 +96,7 @@ Evaluate Shader declares every attribute the graph reads on its GLSL MAT's **Att
       }
     },
     "n_c3": {
-      "type": "PrincipledBSDF",
+      "type": "PBR",
       "inputs": {
         "base_color": ["n_b2", "color"],
         "metallic": 0.0,
@@ -114,7 +123,8 @@ tdx-matx/
   tdx-matx.toe               the project file; all node COMPs live inside it for now (exportable to .tox later)
   nodes/                     (later) exported .tox per node, grouped by category
   glsl/                      nodes/ (one snippet per node type) and lib/ (helpers shared through @requires: view, lighting, hash, fbm)
-  core/                      shared Python (matx.py: graph JSON + node builder, codegen.py: graph -> GLSL, td_builder.py: builds the library in TD) used by all Script DATs
+  core/                      shared Python (matx.py: graph JSON + node builder, codegen.py: graph -> GLSL, td_builder.py: builds the library in TD, td_release.py: bakes the release .tox) used by all Script DATs
+  release/                   (git-ignored) MATX.tox written by the Release pulse, see "Release"
   examples/                  demo .toe files
   tests/                     pure-Python tests for graph merging and codegen (run outside TD); td_bench.py drives the shader test bench inside TD (/matx/scratch/rig)
 ```

@@ -1,4 +1,4 @@
-// @type PrincipledBSDF
+// @type PBR
 // @category Shader
 // @in vec3 base_color = 0.8
 // @in float metallic = 0.0
@@ -17,10 +17,10 @@
 // TouchDesigner's PBR material as a shading node, following the PBR MAT's exported shader:
 // vertex colour multiplies the base colour, alpha is premultiplied. `normal` takes a Normal Map
 // or Bump node; unconnected it is the surface normal.
-void matx_PrincipledBSDF(vec3 base_color, float metallic, float roughness, float specular_level,
-                         vec3 emission, float alpha, float ambient_occlusion,
-                         float shadow_strength, vec3 shadow_color, float emission_strength,
-                         vec3 normal, out MatxClosure bsdf)
+void matx_PBR(vec3 base_color, float metallic, float roughness, float specular_level,
+              vec3 emission, float alpha, float ambient_occlusion,
+              float shadow_strength, vec3 shadow_color, float emission_strength,
+              vec3 normal, out MatxClosure bsdf)
 {
 	vec4 vertColor = TDPixelColor(iVert.color);
 

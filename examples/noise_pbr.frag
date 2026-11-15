@@ -366,10 +366,10 @@ void matx_MixColor(int blend_type, int clamp_result, float fac, vec3 a, vec3 b, 
 // TouchDesigner's PBR material as a shading node, following the PBR MAT's exported shader:
 // vertex colour multiplies the base colour, alpha is premultiplied. `normal` takes a Normal Map
 // or Bump node; unconnected it is the surface normal.
-void matx_PrincipledBSDF(vec3 base_color, float metallic, float roughness, float specular_level,
-                         vec3 emission, float alpha, float ambient_occlusion,
-                         float shadow_strength, vec3 shadow_color, float emission_strength,
-                         vec3 normal, out MatxClosure bsdf)
+void matx_PBR(vec3 base_color, float metallic, float roughness, float specular_level,
+              vec3 emission, float alpha, float ambient_occlusion,
+              float shadow_strength, vec3 shadow_color, float emission_strength,
+              vec3 normal, out MatxClosure bsdf)
 {
 	vec4 vertColor = TDPixelColor(iVert.color);
 
@@ -407,7 +407,7 @@ void main()
 	vec3 n_mix_result;
 	matx_MixColor(MATX_MIXCOLOR_BLEND_TYPE_MIX, MATX_MIXCOLOR_CLAMP_RESULT_OFF, n_noise_fac, n_a_color_out, n_b_color_out, n_mix_result);
 	MatxClosure n_bsdf_bsdf;
-	matx_PrincipledBSDF(n_mix_result, 0.0, 0.35, 0.5, vec3(0.0, 0.0, 0.0), 1.0, 1.0, 1.0, vec3(0.0, 0.0, 0.0), 1.0, iVert.worldSpaceNorm, n_bsdf_bsdf);
+	matx_PBR(n_mix_result, 0.0, 0.35, 0.5, vec3(0.0, 0.0, 0.0), 1.0, 1.0, 1.0, vec3(0.0, 0.0, 0.0), 1.0, iVert.worldSpaceNorm, n_bsdf_bsdf);
 
 	vec4 finalColor = vec4(n_bsdf_bsdf.radiance, n_bsdf_bsdf.alpha);
 
