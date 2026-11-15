@@ -234,6 +234,14 @@ def ensure_node_comp(library: COMP, snip: dict, report: list) -> COMP:
 	return ensure_node_contents(comp, snip, report)
 
 
+def _order_pars(pars: list) -> None:
+	"""Puts pars (one page's) in list order, in the slots they hold now."""
+	slots = sorted(p.order for p in pars)
+	for p, slot in zip(pars, slots):
+		if p.order != slot:
+			p.order = slot
+
+
 def ensure_node_contents(comp: COMP, snip: dict, report: list) -> COMP:
 	"""Creates or updates the inside and parameters of a node COMP (the library one or a copy)."""
 	t = snip['type']
@@ -267,6 +275,7 @@ def ensure_node_contents(comp: COMP, snip: dict, report: list) -> COMP:
 
 	matx = op.Matx.op('core/matx').module
 	inputs_page = _page(comp, 'Inputs')
+	ordered = []   # the Inputs page in snippet order, which a parameter added later does not get
 	for (name, items) in snip['menus']:
 		label = _label(name)
 		pars = _ensure_par(comp, inputs_page, matx.par_name(name), 'Menu', report, label,
@@ -274,9 +283,10 @@ def ensure_node_contents(comp: COMP, snip: dict, report: list) -> COMP:
 		                   'not an input socket.%s' % (label, _enable_help(snip, name)),
 		                   default=items[0], menu=(items, [_label(i) for i in items]))
 		_set_enable(pars, _enable_expr(snip, name, matx))
+		ordered += pars
 	choosable = [n for n in snip['uniforms'] if n not in snip['driven']]
 	if choosable:
-		_ensure_par(comp, inputs_page, 'Asuniform', 'Toggle', report, 'As Uniform',
+		ordered += _ensure_par(comp, inputs_page, 'Asuniform', 'Toggle', report, 'As Uniform',
 		            'On: %s becomes a uniform on the GLSL MAT, so animating it does not recompile '
 		            'the shader. Off: the value is baked into the shader as a literal.'
 		            % ', '.join(_label(n) for n in choosable), default=False)
@@ -294,9 +304,10 @@ def ensure_node_contents(comp: COMP, snip: dict, report: list) -> COMP:
 			                          "Size of the attribute. It must match the geometry's attribute, or the values "
 			                          'read are wrong.', default=ty, menu=(types, ['Float', 'Vec2', 'Vec3', 'Vec4']))
 		_set_enable(pars, _enable_expr(snip, name, matx))
+		ordered += pars
 	for (ty, name) in snip['samplers']:
 		label = _label(name)
-		_ensure_par(comp, inputs_page, matx.par_name(name), 'TOP', report, label,
+		ordered += _ensure_par(comp, inputs_page, matx.par_name(name), 'TOP', report, label,
 		            "TOP sampled by this node (a %s uniform bound on the Evaluate Shader's GLSL MAT)." % ty)
 	ins, outs = [], []
 	kind = op.Matx.op('core/codegen').module.socket_kind
@@ -315,6 +326,8 @@ def ensure_node_contents(comp: COMP, snip: dict, report: list) -> COMP:
 		                   expr=snip['driven'].get(name))
 		# greyed out while a wire feeds the socket (in_<name> is connector i) or a menu leaves it unused
 		_set_enable(pars, _enable_expr(snip, name, matx, connector=i))
+		ordered += pars
+	_order_pars(ordered)
 	_remove_stale(comp, 'in_', {o.name for o in ins}, report)
 
 	sockets = snip['outs'] or [(None, None)]

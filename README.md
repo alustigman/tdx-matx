@@ -49,6 +49,7 @@ From Python: `op.Matx.op('core/td_release').module.release(op.Matx)`, or `bake(o
 - **Sockets are coloured like Blender's**: grey for a float, blue-violet for a vector, yellow for a colour, green for a shader. TouchDesigner draws the colour as a band where the wire attaches and as an outline on an empty connector (it comes from the In/Out DAT behind the connector).
 - **Menus are compile-time constants** (the Noise type, the Voronoi feature, a Math operation): changing one recompiles the shader, everything else is an input you can wire.
 - **A connected input greys out its parameter**, the way Blender hides a socket's value field, and so does a menu that leaves it unused: Noise's W outside 1D and 4D, Math's C outside Multiply Add, Compare, Smooth Min/Max and Wrap. A snippet declares it with `// @enable c if operation multiply_add ...`.
+- **Bump has two qualities.** Low (the default) measures the height's slope across each 2x2 block of pixels, which looks blocky up close. High evaluates the part of the graph feeding Height twice more, as at a point Filter Width of a pixel to the right and one above, the way Blender does: smooth at every pixel and right for any procedural texture, for three times the cost of that part of the graph. Nodes that do not depend on the pixel (a Value, a Time) are not repeated. A snippet asks for it with `// @differentiate height by filter_width if quality high`.
 
 ### Geometry attributes (POPs)
 
