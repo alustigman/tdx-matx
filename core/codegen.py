@@ -108,13 +108,16 @@ ATTRIBUTES = {
 	'object_pos':   ('vec3',     'objectPos',      'pos'),
 	'object_normal': ('vec3',    'objectNorm',     'normal'),
 	'uv':           ('vec3',     'uv',             'TDInstanceTexCoord(TDTexAttrib_Tex(0u))'),
+	'world_tangent': ('vec4',    'worldSpaceTangent', 'vec4(TDDeformNorm(TDAttrib_T().xyz), TDAttrib_T().w)'),
 	'camera_index': ('flat int', 'cameraIndex',    'TDCameraIndex()'),
 }
 
 # Built-in attributes that read a geometry attribute, which must then be declared on the GLSL
 # MAT's Attributes page: name -> (geometry attribute, abstract type). TDTexCoord(0u) is empty
 # for POPs; TDTexAttrib_Tex(0u) is Tex for POPs and uv[0] for SOPs.
-ATTRIBUTE_GEO = {'uv': ('Tex', 'vec3')}
+# world_tangent is the T attribute (tangent, w the handedness) in world space, not normalized
+# here so a missing T stays zero instead of NaN.
+ATTRIBUTE_GEO = {'uv': ('Tex', 'vec3'), 'world_tangent': ('T', 'vec4')}
 
 # The shader output (fog) reads these whatever the graph contains.
 SURFACE_ATTRS = ('world_pos', 'camera_index')

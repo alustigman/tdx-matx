@@ -11,7 +11,7 @@ See `README.md` for the project overview. This document is a living plan; items 
 - `/matx_demo` is the user's test scene (a sphere shaded through `evaluate1`).
 - `/matx/scratch/rig` is the **shader test bench**: a POP plane and a SOP plane (or sphere) rendered with the material of `eval1`, driven by `tests/td_bench.py` (`H.compile_all()` compiles every node type on a real GLSL MAT, `H.sheet()` renders contact sheets).
 - 60 nodes in 6 groups, see section 2.
-- Unit tests: `python -m unittest discover -s tests` (35 tests, pure Python, no TD needed), including one that generates every snippet through every output.
+- Unit tests: `python -m unittest discover -s tests` (36 tests, pure Python, no TD needed), including one that generates every snippet through every output.
 
 **Recent work (2026-11-14):**
 1. Geometry attributes by name (`@attrib`): TexCoord reads `Tex` by default, the Attribute node reads any POP attribute, and EvaluateShader declares them on the GLSL MAT's Attributes page (section 1.7).
@@ -25,9 +25,10 @@ See `README.md` for the project overview. This document is a living plan; items 
 9. The **Release** pulse on `/matx` (`core/td_release.py`, see README "Release"): Build, then bake `core`, `snippets`, `nodes` and `fam` into one `MATX` COMP with every file reference cleared, and save it to `release/MATX.tox`. The staging copy is made, baked, saved and destroyed in one call: a copied TDFam tries to register its family at the end of the frame, and with `/matx/fam` owning MATX that would open an "Already Registered" dialog. Giving the copy the `Matx` shortcut does not take it from `/matx` (the first holder keeps it), and the value is saved with the release.
 10. Every node starts with Preview off, including nodes placed from the TAB menu.
 11. Bump **Quality** (2026-11-15, branch `feature/bump-quality`): Low is the old `dFdx(height)`; High re-evaluates the height's graph as at the neighbouring pixels. The snippet header `// @differentiate height by filter_width if quality high` gives `matx_Bump` two more parameters, `height_dx` and `height_dy`. Codegen emits the pixel-dependent nodes feeding `height` (those whose snippet or helpers read `iVert` or `gl_FragCoord`, have an @attrib or an attribute default, or are fed by such a node) twice more with suffixed variables, after `matxAtPixel(vec2(w, 0))` and `matxAtPixel(vec2(0, w))`. `matxAtPixel` moves `matxV`, a copy of the Vertex block, by `d.x * dFdx + d.y * dFdy` of each member (flat members are copied), and `matxFragCoord`. While a graph differentiates, every snippet, helper and call reads `matxV.` and `matxFragCoord` instead of `iVert.` and `gl_FragCoord`; the fog still reads `iVert`. Graphs without it generate exactly as before. Build now also puts a node's Inputs parameters in snippet order (`_order_pars`), so parameters added later (Quality, Filter Width) do not land at the end.
+12. **Normal Map** redesigned as a texture node (2026-11-15, branch `feature/normal-map-texture`), following the PBR MAT's exported shader: it samples its own TOP (`@sampler sampler2D image`, `vector` = uv) as a tangent-space map, scales x and y by Strength (the PBR MAT's Bump Scale) and transforms it with `TDCreateTBNMatrix(N, T, T.w)`. The tangent comes from the geometry's `T` attribute (float4, w the handedness) through a new built-in attribute `world_tangent` (`vec4(TDDeformNorm(T.xyz), T.w)`, normalized in the pixel shader so a missing T stays zero and falls back to the surface normal; TD then warns on the Render TOP, as for its own PBR MAT). The Space menu and the derivative-built tangent frame are gone. On a POP plane with tangents it matches the PBR MAT pixel for pixel (max 1/255).
 
 **Loose ends:**
-- A Sampler, Color Ramp or Triplanar node without a TOP is a generation error (magenta fallback) until a TOP is set on it.
+- A Sampler, Normal Map, Color Ramp or Triplanar node without a TOP is a generation error (magenta fallback) until a TOP is set on it.
 - Transparency (Transparent BSDF, Mix Shader towards nothing) needs Blending turned on by hand on the Evaluate Shader's `glsl_mat` (Common page).
 - Bump at low quality measures the height's slope between neighbouring pixels (`dFdx`/`dFdy`), so it looks blocky up close; high quality fixes that but repeats the height's graph. Heights with detail finer than a pixel alias either way (more visibly at high quality, which sees the sub-pixel slope). A differentiated input nested inside a repeat keeps its values at this pixel.
 - Vector Transform's object space is the Geometry COMP's transform; it does not include instancing.
@@ -123,10 +124,10 @@ Implemented (60). The group is the snippet's `@category`, which is also its grou
 | Category | Nodes |
 |---|---|
 | Input | Tex Coord (uv from a named attribute, window), Attribute, Vertex Color, Geometry (position, normal, incoming, object position and normal, backfacing), Camera Data, Fresnel, Layer Weight, Time, Value, RGB, XYZ |
-| Texture | Noise Texture (1D-4D; fBM, multifractal, hybrid, ridged, hetero terrain), Voronoi Texture (1D-4D; F1, F2, Smooth F1, distance to edge, n-sphere radius; 4 metrics), White Noise, Wave, Checker, Brick, Gradient, Magic, Shape (circle, rectangle, rounded rectangle, polygon), Sampler (a TOP), Triplanar (a TOP, no UVs) |
+| Texture | Noise Texture (1D-4D; fBM, multifractal, hybrid, ridged, hetero terrain), Voronoi Texture (1D-4D; F1, F2, Smooth F1, distance to edge, n-sphere radius; 4 metrics), White Noise, Wave, Checker, Brick, Gradient, Magic, Shape (circle, rectangle, rounded rectangle, polygon), Sampler (a TOP), Triplanar (a TOP, no UVs), Normal Map (a TOP, with the geometry's T) |
 | Color | Mix Color (19 blend types), Invert Color, Hue Saturation, Brightness Contrast, Gamma, Posterize |
 | Converter | Math (41 operations), Vector Math (27), Map Range, Clamp, Mix Float, Mix Vector, Separate / Combine XYZ, Separate / Combine Color (RGB, HSV, HSL), RGB To BW, Blackbody, Color Ramp (a Ramp TOP), Shader To RGB |
-| Vector | Mapping, Vector Rotate, Vector Transform, Normal Map, Bump, Polar Coordinates, Twirl, Flipbook, Matcap UV |
+| Vector | Mapping, Vector Rotate, Vector Transform, Bump, Polar Coordinates, Twirl, Flipbook, Matcap UV |
 | Shader | PBR, Diffuse BSDF, Glossy BSDF, Toon BSDF, Emission Shader, Transparent BSDF, Mix Shader, Add Shader, Evaluate Shader (the material output) |
 
 Not done: RGB Curves / Float Curve (use Color Ramp with any lookup TOP), Displacement and other vertex-stage nodes, Light Path, Object Info, environment / sky textures, Gabor.

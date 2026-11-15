@@ -1,39 +1,28 @@
 // @type NormalMap
-// @category Vector
-// @menu space tangent object world
+// @category Texture
+// @sampler sampler2D image
 // @in float strength = 1.0 [0 2]
-// @in vec3 color = 0.5 0.5 1.0
-// @in vec3 uv = uv
+// @in vec3 vector = uv
 // @out vec3 normal
-// @attr world_pos world_normal camera_index
-// @requires view
-// Turns a normal map's colour into a world-space normal for a shader's normal input. In
-// tangent space (the usual blue-ish maps) the tangent frame is rebuilt per pixel from the
-// surface and the uv input (connect the same coordinates the map is sampled with), so the
-// geometry needs no tangent attribute. strength blends between the surface normal (0) and the
-// mapped one (1, and beyond to exaggerate).
-void matx_NormalMap(int space, float strength, vec3 color, vec3 uv, out vec3 normal)
+// @attr world_pos world_normal world_tangent
+// Samples the TOP set on the node as a tangent-space normal map and turns it into a world-space
+// normal for a shader's normal input, as TouchDesigner's PBR MAT does: the tangent frame comes
+// from the geometry's T attribute (xyz the tangent, w the handedness), so the geometry needs
+// one (a Normal POP with tangents on, or an Attribute Create SOP with Compute Tangents).
+// strength scales the map's x and y (the PBR MAT's Bump Scale). `vector` defaults to the mesh
+// UV; only .xy is used.
+void matx_NormalMap(sampler2D image, float strength, vec3 vector, out vec3 normal)
 {
-	vec3 N = matx_shading_normal(iVert.worldSpaceNorm);
-	vec3 mapped = color * 2.0 - 1.0;
-	if (space == MATX_NORMALMAP_SPACE_OBJECT)
-		mapped = uTDMats[iVert.cameraIndex].worldForNormals * mapped;
-	else if (space == MATX_NORMALMAP_SPACE_TANGENT)
+	vec3 N = normalize(iVert.worldSpaceNorm);
+	vec3 T = iVert.worldSpaceTangent.xyz;
+	if (dot(T, T) <= 0.0)
 	{
-		// cotangent frame from screen-space derivatives (Schueler, "Followup: Normal Mapping
-		// Without Precomputed Tangents")
-		vec3 dp1 = dFdx(iVert.worldSpacePos.xyz);
-		vec3 dp2 = dFdy(iVert.worldSpacePos.xyz);
-		vec2 duv1 = dFdx(uv.xy);
-		vec2 duv2 = dFdy(uv.xy);
-		vec3 dp2perp = cross(dp2, N);
-		vec3 dp1perp = cross(N, dp1);
-		vec3 T = dp2perp * duv1.x + dp1perp * duv2.x;
-		vec3 B = dp2perp * duv1.y + dp1perp * duv2.y;
-		float len2 = max(dot(T, T), dot(B, B));
-		mapped = len2 > 0.0 ? mat3(T * inversesqrt(len2), B * inversesqrt(len2), N) * mapped : N;
+		normal = N;   // no T attribute: the surface normal
+		return;
 	}
-	mapped = dot(mapped, mapped) > 0.0 ? normalize(mapped) : N;
-	vec3 blended = N + (mapped - N) * max(strength, 0.0);
-	normal = dot(blended, blended) > 0.0 ? normalize(blended) : N;
+	mat3 tangentToWorld = TDCreateTBNMatrix(N, normalize(T), iVert.worldSpaceTangent.w);
+	vec3 n = 2.0 * (texture(image, vector.xy).xyz - 0.5);
+	n.xy *= strength;
+	n = tangentToWorld * n;
+	normal = dot(n, n) > 0.0 ? normalize(n) : N;
 }
