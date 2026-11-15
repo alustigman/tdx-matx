@@ -21,10 +21,10 @@ tdx-matx works with [TDFam](https://github.com/dotsimulate/TDFam), the open-sour
 | Group | Nodes |
 |---|---|
 | Input | Tex Coord, Attribute, Vertex Color, Geometry, Camera Data, Fresnel, Layer Weight, Time, Value, RGB, XYZ |
-| Texture | Noise, Voronoi, White Noise, Wave, Checker, Brick, Gradient, Magic, Shape, Sampler, Triplanar |
+| Texture | Noise, Voronoi, White Noise, Wave, Checker, Brick, Gradient, Magic, Shape, Sampler, Triplanar, Normal Map |
 | Color | Mix Color, Invert Color, Hue Saturation, Brightness Contrast, Gamma, Posterize |
 | Converter | Math, Vector Math, Map Range, Clamp, Mix Float, Mix Vector, Separate / Combine XYZ, Separate / Combine Color, RGB To BW, Blackbody, Color Ramp, Shader To RGB |
-| Vector | Mapping, Vector Rotate, Vector Transform, Normal Map, Bump, Polar Coordinates, Twirl, Flipbook, Matcap UV |
+| Vector | Mapping, Vector Rotate, Vector Transform, Bump, Polar Coordinates, Twirl, Flipbook, Matcap UV |
 | Shader | PBR, Diffuse BSDF, Glossy BSDF, Toon BSDF, Emission Shader, Transparent BSDF, Mix Shader, Add Shader, Evaluate Shader |
 
 - Press **Build** on `/matx` (Matx page): besides regenerating the nodes, it loads the TDFam component into `/matx/fam` from `third_party/TDFam/TDFam_create.tox` if it is missing, points it at `/matx/nodes`, and writes each node's menu label and group into its TDFam manifest. A new snippet joins the menu on the next Build; its group comes from the snippet's `// @category` header line. When a library node is not in the family colour (a node Build just created, say), Build turns the family's **Install** toggle off and back on a few frames later, which recolours the library.

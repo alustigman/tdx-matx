@@ -243,6 +243,15 @@ class Codegen(unittest.TestCase):
 		with self.assertRaisesRegex(codegen.MatxError, 'cannot be read as vec2'):
 			codegen.generate(g, SNIPS, LIB)
 
+	def test_normal_map_reads_the_tangent_attribute(self):
+		g = {'version': 1, 'nodes': {'n_nm': {'type': 'NormalMap', 'inputs': {}, 'samplers': {'image': '/top'}}},
+		     'output': ['n_nm', 'normal']}
+		r = codegen.generate(g, SNIPS, LIB)
+		self.assertEqual(sorted(r['attribs']), [['T', 'float4'], ['Tex', 'float3']])
+		self.assertIn('vec4 worldSpaceTangent;', r['vertex'])
+		self.assertIn('oVert.worldSpaceTangent = vec4(TDDeformNorm(TDAttrib_T().xyz), TDAttrib_T().w);', r['vertex'])
+		self.assertIn('matx_NormalMap(sMatx_n_nm_image, 1.0, iVert.uv, n_nm_normal);', r['pixel'])
+
 	def test_attribs_recorded_on_node(self):
 		spec = matx.spec_from_snippet(SNIPS['Attribute'])
 		self.assertEqual(spec['attribs'], {'attribute': ('vec4', 'Color', 'typed')})
