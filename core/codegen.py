@@ -22,6 +22,7 @@ Snippet files (glsl/nodes/*.glsl) start with a header of `// @key value` lines:
     // @menu  operation add subtract   (a constant chosen from a menu, the first item by default)
     // @attrib vec3 attribute = Tex texcoord   (a geometry attribute chosen by name, see below)
     // @enable c if operation multiply_add wrap   (when a parameter is in use, see below)
+    // @differentiate height by filter_width if quality high   (see below)
 
 The graph's `output` ([node_id, socket]) is the surface the shader renders. A closure output
 supplies radiance and alpha; any other value is shaded as emission, converted to vec4 like any
@@ -62,6 +63,18 @@ attribute for POPs and uv[0] for SOPs; `Tex` read that way is the built-in `uv` 
 unused, the way Blender hides them: the parameters of the named @in, @menu or @attrib entries are
 greyed out unless (`if`) or while (`unless`) the menu holds one of the items. Several @enable
 lines on one parameter must all hold. It only drives the node's UI; the shader does not change.
+
+`// @differentiate <input> [by <float input>] [if <menu> <item>...]` gives the snippet the input
+as it is at the neighbouring pixels too, the way Blender's Bump gets its height: the function takes
+two more parameters right after the input, `<input>_dx` and `<input>_dy`, holding the input as at
+the pixel `by` pixels to the right and the one `by` pixels above (1.0 without `by`). The graph that
+feeds the input is not differentiated: the nodes of it that read the geometry (the Vertex block,
+directly, through an attribute default or an @attrib, or gl_FragCoord) are emitted twice more, with
+every such read moved to the neighbouring pixel (iVert.x + by * dFdx(iVert.x)). So any texture
+fed by any coordinate works, and nodes that do not depend on the pixel are not repeated. With
+`if`, this happens only while the node's menu holds one of the items; otherwise, or when the input
+does not depend on the pixel, `<input>_dx` and `<input>_dy` are the input itself. Within such a
+repetition, a nested differentiated input keeps its values at this pixel.
 """
 import re
 
@@ -106,6 +119,9 @@ ATTRIBUTE_GEO = {'uv': ('Tex', 'vec3')}
 # The shader output (fog) reads these whatever the graph contains.
 SURFACE_ATTRS = ('world_pos', 'camera_index')
 
+# A snippet or helper that matches this depends on the pixel (see @differentiate).
+PIXEL_READ = re.compile(r'\biVert\.|\bgl_FragCoord\b')
+
 # What an unconnected closure input is: no light and no coverage, so adding it changes nothing
 # and mixing towards it fades the surface out.
 EMPTY_CLOSURE = 'MatxClosure(vec3(0.0), 0.0)'
@@ -143,12 +159,13 @@ def parse_snippet(text):
 	outs=[(type,name)], attrs, requires, uniforms, driven={uniform: expression},
 	attribs=[(type,name,default attribute,flavor)], ranges={input: (low, high)},
 	enables={parameter: [(menu, [items], True for `if` / False for `unless`)]},
-	kinds={output: 'vector' | 'color'} (from `@out vec3 result vector`), category, body).
+	kinds={output: 'vector' | 'color'} (from `@out vec3 result vector`),
+	differentiate={input: (by input or None, menu or None, [items])}, category, body).
 	A default is a float, a list of floats, an attribute name or None. @enable only drives the
 	node's UI: the shader is the same whatever is greyed out."""
 	snip = {'type': None, 'samplers': [], 'ins': [], 'outs': [], 'attrs': [], 'requires': [],
 	        'uniforms': [], 'driven': {}, 'menus': [], 'attribs': [], 'ranges': {}, 'enables': {},
-	        'kinds': {}, 'category': None}
+	        'kinds': {}, 'differentiate': {}, 'category': None}
 	body = []
 	for line in text.splitlines():
 		m = re.match(r'\s*//\s*@(\w+)\s*(.*?)\s*$', line)
@@ -221,6 +238,13 @@ def parse_snippet(text):
 			names, word, menu, items = m2.groups()
 			for name in names.split():
 				snip['enables'].setdefault(name, []).append((menu, items.split(), word == 'if'))
+		elif key == 'differentiate':
+			m2 = re.match(r'(\w+)(?:\s+by\s+(\w+))?(?:\s+if\s+(\w+)((?:\s+\w+)+))?$', rest)
+			if not m2 or m2.group(1) in snip['differentiate']:
+				raise MatxError('bad @differentiate line (want: input [by input] [if menu item...], once '
+				                'per input): %r' % line)
+			name, by, menu, items = m2.groups()
+			snip['differentiate'][name] = (by, menu, items.split() if items else [])
 		else:
 			raise MatxError('unknown snippet key @%s' % key)
 	if not snip['type']:
@@ -250,6 +274,13 @@ def parse_snippet(text):
 			unknown = [i for i in items if i not in menus[menu]]
 			if unknown:
 				raise MatxError('@enable %s: @menu %s has no item %s' % (name, menu, ', '.join(unknown)))
+	for name, (by, menu, items) in snip['differentiate'].items():
+		if name not in ins or ins[name][0] == CLOSURE:
+			raise MatxError('@differentiate %s must name a non-closure @in' % name)
+		if by is not None and (by not in ins or ins[by][0] != 'float'):
+			raise MatxError('@differentiate %s: %r is not a float @in' % (name, by))
+		if menu is not None and (menu not in menus or any(i not in menus[menu] for i in items)):
+			raise MatxError('@differentiate %s: %r is not a @menu holding %s' % (name, menu, ', '.join(items)))
 	snip['body'] = '\n'.join(body).strip() + '\n'
 	if not re.search(r'\bvoid\s+matx_%s\s*\(' % snip['type'], snip['body']):
 		raise MatxError('snippet %s must define void matx_%s(...)' % (snip['type'], snip['type']))
@@ -447,6 +478,11 @@ def generate(graph, snippets, lib=None):
 		if geo.setdefault(name, ty) != ty:
 			raise MatxError('attribute %s is read as %s and as %s' % (name, geo[name], ty))
 
+	# Every node's call, its arguments as (text, link) with link = (source node, source variable,
+	# source type, input type) for a wired input, and whether it depends on the pixel (`varying`).
+	calls = {}
+	varying = {}
+	reads_pixel = {}   # node type -> its snippet or helpers read the Vertex block or gl_FragCoord
 	for nid in order:
 		node = nodes[nid]
 		t = node['type']
@@ -458,6 +494,10 @@ def generate(graph, snippets, lib=None):
 			for a in sn['attrs']:
 				use_attr(a)
 			_collect_lib(sn['requires'], lib, seen_lib, libs)
+			own = []
+			_collect_lib(sn['requires'], lib, set(), own)
+			reads_pixel[t] = any(PIXEL_READ.search(s) for s in [sn['body']] + own)
+		vary = reads_pixel[t] or bool(sn['attribs'])
 
 		args = []
 		for (ty, name) in sn['samplers']:
@@ -490,7 +530,10 @@ def generate(graph, snippets, lib=None):
 				if member not in [m for (_, m, _) in named]:
 					named.append((GLSL_TYPE[a_type], member, expr))
 			args.append(convert('iVert.' + member, a_type, ty))
+		links = {}   # argument index -> (source node, source variable, source type, input type)
+		at = {}      # input name -> argument index
 		for (ty, name, default) in sn['ins']:
+			at[name] = len(args)
 			v = node.get('inputs', {}).get(name, default)
 			ref = node.get('uniforms', {}).get(name)
 			if ref is not None and not is_link(v):
@@ -515,28 +558,85 @@ def generate(graph, snippets, lib=None):
 				use_attr(v)
 				a_type, member, _ = ATTRIBUTES[v]
 				args.append(convert('iVert.' + member, a_type, ty))
+				vary = vary or a_type in COMPONENTS
 			elif is_link(v):
 				src_id, src_sock = v
 				key = _var(src_id, src_sock)
 				if key not in out_types:
 					raise MatxError('node %s: link to unknown output %s.%s' % (nid, src_id, src_sock))
+				links[len(args)] = (src_id, key, out_types[key], ty)
 				args.append(convert(key, out_types[key], ty))
+				vary = vary or varying[src_id]
 			else:
 				args.append(literal(ty, v))
+		diffs = {}   # argument index -> (argument index of `by` or None, whether it applies now)
+		for name, (by, menu, items) in sn['differentiate'].items():
+			chosen = node.get('menus', {}).get(menu, dict(sn['menus'])[menu][0]) if menu else None
+			diffs[at[name]] = (at[by] if by else None, menu is None or chosen in items)
 		outs = []
 		for (ty, name) in sn['outs']:
 			var = _var(nid, name)
 			out_types[var] = ty
-			body.append('\t%s %s;' % (GLSL_TYPE[ty], var))
-			outs.append(var)
-		body.append('\tmatx_%s(%s);' % (t, ', '.join(args + outs)))
+			outs.append((GLSL_TYPE[ty], var))
+		calls[nid] = (t, args, links, diffs, outs)
+		varying[nid] = vary
+
+	repeats = []      # one entry per differentiated input whose graph is emitted again
+	at_pixel = {}     # (node, argument index) -> [_dx, _dy] arguments of its call at this pixel
+
+	def emit(nid, suffix=''):
+		"""Appends the call of node nid to body. suffix '' is the call at this pixel; '_dx<k>' or
+		'_dy<k>' a repetition at a neighbouring pixel, reading the repeated sources' variables."""
+		t, args, links, diffs, outs = calls[nid]
+		args = list(args)
+		for i, (src, key, src_ty, ty) in links.items():
+			if suffix and varying[src]:
+				args[i] = convert(key + suffix, src_ty, ty)
+		extra = {}
+		for i, (by, applies) in diffs.items():
+			if suffix:   # nested in a repetition: keep the values at this pixel
+				args[i] = calls[nid][1][i]
+				extra[i] = at_pixel[(nid, i)]
+			elif applies and i in links and varying[links[i][0]]:
+				extra[i] = at_pixel[(nid, i)] = repeat(links[i], args[by] if by is not None else '1.0')
+			else:
+				extra[i] = at_pixel[(nid, i)] = [args[i], args[i]]
+		full = []
+		for i, a in enumerate(args):
+			full.append(a)
+			full += extra.get(i, [])
+		for (glsl_ty, var) in outs:
+			body.append('\t%s %s;' % (glsl_ty, var + suffix))
+		body.append('\tmatx_%s(%s);' % (t, ', '.join(full + [var + suffix for (_, var) in outs])))
+
+	def repeat(link, by):
+		"""Emits the pixel-dependent part of the graph feeding link twice more, as at the pixel by
+		pixels to the right and the one above; returns the input's [_dx, _dy] expressions."""
+		src, key, src_ty, ty = link
+		k = len(repeats)
+		repeats.append(src)
+		part = [n for n in sort_graph(graph, src) if varying[n]]
+		res = []
+		body.append('\t// %s again, as at the neighbouring pixels (@differentiate)' % key)
+		for axis, offset in (('dx', 'vec2(%s, 0.0)'), ('dy', 'vec2(0.0, %s)')):
+			suffix = '_%s%d' % (axis, k)
+			body.append('\tmatxAtPixel(%s);' % (offset % by))
+			for n in part:
+				emit(n, suffix)
+			res.append(convert(key + suffix, src_ty, ty))
+		body.append('\tmatxAtPixel(vec2(0.0));')
+		return res
+
+	for nid in order:
+		emit(nid)
 
 	key = _var(root, socket)
 	if key not in out_types:
 		raise MatxError('node %s (%s) has no output %r' % (root, nodes[root]['type'], socket))
 	decls = [(ty, u) for (ty, u, _) in samplers] + [(ty, u) for (ty, u, _, _, _) in uniforms]
 	members = [ATTRIBUTES[a] for a in ATTRIBUTES if a in attrs] + named
-	pixel = _pixel(snippets, body, members, libs, used_types, surface_color(key, out_types[key]), decls)
+	pixel = _pixel(snippets, body, members, libs, used_types, surface_color(key, out_types[key]), decls,
+	               bool(repeats))
 	return {'vertex': _vertex(members), 'pixel': pixel, 'attributes': attrs, 'order': order,
 	        'samplers': [[u, path] for (_, u, path) in samplers],
 	        'uniforms': [[u, path, par, page] for (_, u, path, par, page) in uniforms],
@@ -628,7 +728,31 @@ def menu_constant(type_, menu, item):
 	return ('MATX_%s_%s_%s' % (type_, menu, item)).upper()
 
 
-def _pixel(snippets, body, members, libs, used_types, surface, decls):
+def _at_pixel(members):
+	"""matxV, the Vertex block as the nodes read it, and matxAtPixel(), which moves it (and
+	matxFragCoord) to the pixel d pixels away by following the derivatives of every member."""
+	struct = ['struct MatxVertex', '{'] + ['\t%s %s;' % (t.replace('flat ', ''), m) for (t, m, _) in members]
+	moves = []
+	for (t, m, _) in members:
+		if t.startswith('flat '):
+			moves.append('\tmatxV.%s = iVert.%s;' % (m, m))
+		else:
+			moves.append('\tmatxV.{0} = iVert.{0} + d.x * dFdx(iVert.{0}) + d.y * dFdy(iVert.{0});'.format(m))
+	return '\n'.join(
+		['// The Vertex block and gl_FragCoord as the nodes read them: at this pixel, or at a',
+		 '// neighbouring one while an input is evaluated there again (@differentiate)']
+		+ struct + ['};', 'MatxVertex matxV;', 'vec4 matxFragCoord;', '',
+		            'void matxAtPixel(vec2 d)', '{'] + moves
+		+ ['\tmatxFragCoord = gl_FragCoord + vec4(d, 0.0, 0.0);', '}']) + '\n'
+
+
+def _read_at_pixel(text):
+	"""Points the reads of the Vertex block and gl_FragCoord at matxV and matxFragCoord."""
+	return re.sub(r'\bgl_FragCoord\b', 'matxFragCoord', re.sub(r'\biVert\.', 'matxV.', text))
+
+
+def _pixel(snippets, body, members, libs, used_types, surface, decls, differentiating=False):
+	moved = _read_at_pixel if differentiating else (lambda s: s)
 	lines = ['// generated by tdx-matx -- do not edit', '#include <TDColorSpace>', '',
 	         _block('in Vertex', 'iVert', members),
 	         '// Output variable for the color',
@@ -636,13 +760,17 @@ def _pixel(snippets, body, members, libs, used_types, surface, decls):
 	if decls:
 		lines += ['uniform %s %s;' % (ty, u) for (ty, u) in decls] + ['']
 	lines += [PIXEL_PREAMBLE]
-	lines += libs
+	if differentiating:
+		lines += [_at_pixel(members)]
+	lines += [moved(s) for s in libs]
 	for t in used_types:
 		consts = ['const int %s = %d;' % (menu_constant(t, name, item), i)
 		          for (name, items) in snippets[t]['menus'] for i, item in enumerate(items)]
-		lines += consts + [''] * bool(consts) + [snippets[t]['body']]
+		lines += consts + [''] * bool(consts) + [moved(snippets[t]['body'])]
 	lines += ['void main()', '{', PIXEL_HEAD]
-	lines += body
+	if differentiating:
+		lines += ['\tmatxAtPixel(vec2(0.0));']
+	lines += [moved(s) for s in body]
 	lines += ['', PIXEL_TAIL.format(surface=surface) + '}']
 	return '\n'.join(lines) + '\n'
 

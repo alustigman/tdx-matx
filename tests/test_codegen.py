@@ -1,4 +1,5 @@
 import json
+import re
 import os
 import sys
 import unittest
@@ -342,6 +343,63 @@ class Codegen(unittest.TestCase):
 			codegen.parse_snippet('// @type X\n// @in float a = 0 [lo hi]\nvoid matx_X() {}')
 		with self.assertRaisesRegex(codegen.MatxError, 'neither'):
 			codegen.parse_snippet('// @type X\n// @in vec3 v = bogus\nvoid matx_X() {}')
+		for bad in ('// @differentiate', '// @differentiate h by', '// @differentiate h\n// @differentiate h',
+		            '// @differentiate nope', '// @differentiate h by v', '// @differentiate h if m',
+		            '// @differentiate h if m x', '// @differentiate c'):
+			with self.assertRaisesRegex(codegen.MatxError, '@differentiate'):
+				codegen.parse_snippet('// @type X\n// @menu m a b\n// @in float h\n// @in vec3 v\n'
+				                      '// @in closure c\n%s\nvoid matx_X() {}' % bad)
+
+	def _bump_graph(self, quality='high', height=None, width=None):
+		"""TexCoord -> Noise Texture (scale from a Value) -> Bump.height."""
+		nodes = {'n_uv': {'type': 'TexCoord', 'inputs': {}},
+		         'n_k': {'type': 'Value', 'inputs': {'value': 4.0}},
+		         'n_noise': {'type': 'NoiseTexture', 'inputs': {'vector': ['n_uv', 'uv'],
+		                                                        'scale': ['n_k', 'value_out']}},
+		         'n_b': {'type': 'Bump', 'inputs': {'height': height or ['n_noise', 'fac']},
+		                 'menus': {'quality': quality}}}
+		if width is not None:
+			nodes['n_b']['inputs']['filter_width'] = width
+		return {'version': 1, 'nodes': nodes, 'output': ['n_b', 'result']}
+
+	def test_bump_low_quality_differentiates_the_height(self):
+		self.assertEqual(SNIPS['Bump']['differentiate'], {'height': ('filter_width', 'quality', ['high'])})
+		p = codegen.generate(self._bump_graph('low'), SNIPS, LIB)['pixel']
+		self.assertIn('MATX_BUMP_QUALITY_LOW, 1.0, 1.0, 0.1, n_noise_fac, n_noise_fac, n_noise_fac, '
+		              'iVert.worldSpaceNorm, n_b_result);', p)
+		self.assertNotIn('matxAtPixel', p)
+		self.assertNotIn('matxV', p)
+		self.assertEqual(p.count('matx_NoiseTexture('), 2)   # definition and one call
+
+	def test_bump_high_quality_repeats_the_height_graph(self):
+		p = codegen.generate(self._bump_graph(), SNIPS, LIB)['pixel']
+		self.assertIn('MATX_BUMP_QUALITY_HIGH, 1.0, 1.0, 0.1, n_noise_fac, n_noise_fac_dx0, n_noise_fac_dy0, '
+		              'matxV.worldSpaceNorm, n_b_result);', p)
+		self.assertEqual(p.count('matx_NoiseTexture('), 4)   # at this pixel, right of it and above it
+		self.assertEqual(p.count('matx_Value('), 2)          # does not depend on the pixel: not repeated
+		self.assertIn('n_uv_uv_dx0, 0.0, n_k_value_out, ', p)   # the repeat reads the Value at this pixel
+		main = p[p.index('void main()'):]
+		for line in ('matxAtPixel(vec2(0.0));', 'matxAtPixel(vec2(0.1, 0.0));', 'matxAtPixel(vec2(0.0, 0.1));'):
+			self.assertIn(line, main)
+		self.assertLess(main.index('vec2(0.0, 0.1)'), main.index('matx_Bump('))
+		self.assertLess(main.rindex('matxAtPixel(vec2(0.0));'), main.index('matx_Bump('))
+		# every read of the pixel goes through matxV, except the struct's own update and the fog
+		self.assertIn('matxV.uv = iVert.uv + d.x * dFdx(iVert.uv) + d.y * dFdy(iVert.uv);', p)
+		self.assertIn('matxV.cameraIndex = iVert.cameraIndex;', p)
+		self.assertIn('matxFragCoord.xy', p)
+		self.assertNotIn('gl_FragCoord.xy', p)
+		self.assertIn('TDFog(finalColor, iVert.worldSpacePos.xyz, iVert.cameraIndex)', p)
+		update = p[p.index('void matxAtPixel'):]
+		update = update[:update.index('}') + 1]
+		self.assertEqual(re.findall(r'iVert\.\w+', p.replace(update, '')),
+		                 ['iVert.worldSpacePos', 'iVert.cameraIndex'])   # the fog's
+
+	def test_bump_high_quality_without_a_varying_height(self):
+		for height in (0.5, ['n_k', 'value_out']):   # constant height: no slope, nothing repeated
+			p = codegen.generate(self._bump_graph(height=height), SNIPS, LIB)['pixel']
+			self.assertNotIn('matxAtPixel', p)
+		p = codegen.generate(self._bump_graph(width=['n_k', 'value_out']), SNIPS, LIB)['pixel']
+		self.assertIn('matxAtPixel(vec2(n_k_value_out, 0.0));', p)   # a wired filter width
 
 
 class Graph(unittest.TestCase):
